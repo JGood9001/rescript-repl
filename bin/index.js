@@ -62,3 +62,11 @@ repl()
 // });
 
 // // ^^ All right, this is the general idea.
+
+// NodeJS Removing a file:
+// try {
+//   fs.unlinkSync(path)
+//   //file removed
+// } catch(err) {
+//   console.error(err)
+// }
