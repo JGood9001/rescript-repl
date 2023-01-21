@@ -8,6 +8,13 @@ Run a REPL to execute ReScript code in interactive mode
 npm install rescript-repl
 ```
 
+Then add rescript-repl to bsconfig.json:
+```sh
+"bs-dependencies": [
+   "rescript-repl"
+]
+```
+
 ## Getting Started
 
 - Start the REPL: `$ resrepl`

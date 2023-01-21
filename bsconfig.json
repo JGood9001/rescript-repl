@@ -1,5 +1,5 @@
 {
-  "name": "rescript-project-template",
+  "name": "rescript-repl",
   "sources": {
     "dir": "src",
     "subdirs": true
@@ -9,5 +9,8 @@
     "in-source": true
   },
   "suffix": ".bs.js",
-  "bs-dependencies": []
+  "bs-dependencies": [
+    "rescript-nodejs",
+    "@ryyppy/rescript-promise"
+  ]
 }
