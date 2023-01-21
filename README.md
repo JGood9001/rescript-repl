@@ -1,21 +1,15 @@
-# ReScript Project Template
+# ReScript Repl
 
-The only official ReScript starter template.
+Run a REPL to execute ReScript code in interactive mode
 
 ## Installation
 
 ```sh
-npm install
+npm install rescript-repl
 ```
 
-## Build
+## Getting Started
 
-- Build: `npm run res:build`
-- Clean: `npm run res:clean`
-- Build & watch: `npm run res:dev`
+- Start the REPL: `$ resrepl`
 
-## Run
-
-```sh
-node src/Demo.bs.js
-```
+# rescript-repl

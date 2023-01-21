@@ -1,10 +1,13 @@
 {
-  "name": "rescript-project-template",
+  "name": "rescript-repl",
   "version": "0.0.1",
   "scripts": {
     "res:build": "rescript",
     "res:clean": "rescript clean",
     "res:dev": "rescript build -w"
+  },
+  "bin": {
+    "resrepl": "./bin/index.js"  
   },
   "keywords": [
     "rescript"
