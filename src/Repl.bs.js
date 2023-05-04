@@ -18,6 +18,19 @@ var rl = Readline.createInterface({
       output: Process.stdout
     });
 
+function prompt_2(rl, query, cb) {
+  new Promise((function (resolve, _reject) {
+            rl.question(query, (function (x) {
+                    resolve(x);
+                  }));
+          })).then(Curry.__1(cb));
+}
+
+function repl_2(CLIO, DL) {
+  var cliInterface = Curry._1(CLIO.make, undefined);
+  Curry._3(CLIO.prompt, cliInterface, "\u03BB> ", DL.handleUserInput);
+}
+
 rl.on("close", (function (param) {
         console.log("See You Space Cowboy");
         Fs.unlinkSync("./src/RescriptRepl.res");
@@ -190,6 +203,8 @@ function repl(reset_contents) {
 }
 
 exports.rl = rl;
+exports.prompt_2 = prompt_2;
+exports.repl_2 = repl_2;
 exports.prompt = prompt;
 exports.write = write;
 exports.rewrite = rewrite;

@@ -16,9 +16,112 @@ open NodeJs
 external eval: string => () = "eval"
 external setTimeout: (() => ()) => string => () = "setTimeout"
 
+// May 4th FIX:
+// - If ./src/RescriptRepl.res | ./src/RescriptRepl.bs.js don't exist when "close" event is received,
+//   then don't attempt to remove them... prints out a node error to the user if you do.
+
+// Need to see if I can create an interface which wraps Readline (so I can supply a test instance)
+// https://github.com/TheSpyder/rescript-nodejs/blob/main/src/Readline.res
+// https://nodejs.org/api/readline.html#class-interfaceconstructor
+// https://github.com/TheSpyder/rescript-nodejs/blob/main/src/Readline.res#L57
+// Every instance is associated with a single input Readable stream and a single output Writable stream.
+// The output stream is used to print prompts for user input that arrives on, and is read from, the input stream.
+// ^^ So the test implementation will need to emulate this.
 let rl = Readline.make(
-     Readline.interfaceOptions(~input=Process.process->Process.stdin, ~output=Process.process->Process.stdout, ()),
+    Readline.interfaceOptions(~input=Process.process->Process.stdin, ~output=Process.process->Process.stdout, ()),
 )
+
+// The general flow (not specific to my particular use case):
+// 1. Create a ReadLine instance which facilitates receiving from stdin and sending output back to the user via stdout (Readline.make and Readline.interfaceOptions)
+// 2. 
+// Finally, Clean up upon "close" event being initiated via Ctrl+D | Ctrl+C sent by the user
+
+// The interface to the repl (specific to this domain) logic:
+// 
+
+// ^^ I imagine both of these being passed to the repl function (as first class modules implementing an algebra)
+
+// 1. CommandLineIO
+// 2. Logic
+
+// let e1 = (module (E : ExpAlg with type t = eval)) =>
+	// E.add(E.lit(1), E.lit(2))
+
+// So the user can provide Readline.Interface.t, as you want to keep the underlying implementation hidden from the logic that handles the sequencing
+// of the commandlineioalg and domainlogicalg function invocations.
+type commandLineIO<'a> = 'a
+
+// well Readline.make returns a Interface.t
+module type CommandLineIOAlg = {
+    type t
+
+    let make : () => t
+    let prompt : t => string => (string => ()) => unit
+    let close : t => unit
+}
+
+module type DomainLogicAlg = {
+    // parser will come in handy here...
+    let handleUserInput : string => ()
+    // any way to make this optional?
+    let cleanup : () => unit
+}
+
+// will be used when creating the prod instance for CommandLineIOAlg
+let prompt_2 = (rl, query, cb) =>
+    Promise.make((resolve, _reject) => rl->Readline.Interface.question(query, x => resolve(. x)))
+    ->Promise.then(user_input => cb(user_input))
+    ->ignore
+
+
+let rec repl_2 = (module (CLIO : CommandLineIOAlg), module (DL : DomainLogicAlg)) => {
+    // 1. Create instance of commandline
+    let cliInterface = CLIO.make()
+    // 2. Setup cleanup function upon cliInterface receiving the "close" event
+    // Will require invoking the passed in function whenever... (need to implement the getting input from the user first)
+    // invoke domainlogicalg's cleanup implementation + set mutable variable to indicate that repl's while loop should be broken out of.
+    // rl
+    // ->Readline.Interface.on(Event.fromString("close"), () => {
+    // Js.log("See You Space Cowboy")
+    // // remove files
+    // unlinkSync("./src/RescriptRepl.res")
+    // unlinkSync("./src/RescriptRepl.bs.js")
+    // }) -> ignore
+    // For the test instance, this would require that the type t is mutable so that event handlers may be stored...
+    // cliInterface.on("close", () => {
+    //   DL.cleanup()
+    //   Js.log("See you Space Cowboy")    
+    // })
+
+    // Getting input from the user...
+    // prompt("\u03BB> ") -> Promise.then(user_input => {
+    // Can I hide the fact that promises are being used here?
+    // where prompt currently is:
+    // let prompt = query => Promise.make((resolve, _reject) => rl->Readline.Interface.question(query, x => resolve(. x)))
+    // I suppose just moving the Promise.then into the prompt function and having repl provide a callback function to prompt will work.
+    // while loop here
+    CLIO.prompt(cliInterface, "\u03BB> ", DL.handleUserInput)
+    // handleUserInput actually also needs access to cliInterface's close function,
+    // as that's what I was doing below in the first implementation :exit => rl->Readline.Interface.close
+    // All right... now due to DomainLogicAlg (the implementation specific to rescript repl) needing to handle file operations
+    // I really don't know how to go about implementing it such that there would be instances for both prod/test.
+    // Well after thinking about it a little more, the handle_get_next_contents and (prev_contents/nexdt_contents stuff is domain specific)
+    // and shouldn't be a concern to the repl function.
+    // Maintaining that within the DomainLogicAlg would imply some kind of mutable state if I'm not going to pass it explicitly
+    // through the recursive invocations (ahhh, but I don't even need to recurse, this can just be a loop now).
+    // Ultimately, the implementation of DomainLogicAlg will need to include FilesAlg for which a prod/test instance of that
+    // may be provided.
+
+}
+
+// Rescript REPL Domain specific logic (to be used within handleUserInput)...
+// 1. save
+// 2. write
+// 3. rollback
+// 4. unlinkSync (which is NodeJS' delete file essentially...)
+// 5. rewrite (implemented in terms of delete and write) replacing contents of a current file with a provided string
+
+// ^^ Refactoring ideation...
 
 // https://github.com/TheSpyder/rescript-nodejs/blob/main/src/Readline.res#L38
 // {
@@ -34,6 +137,7 @@ let rl = Readline.make(
 rl
 ->Readline.Interface.on(Event.fromString("close"), () => {
   Js.log("See You Space Cowboy")
+  // remove files
   unlinkSync("./src/RescriptRepl.res")
   unlinkSync("./src/RescriptRepl.bs.js")
 }) -> ignore
