@@ -8,26 +8,31 @@ var Process = require("process");
 var Readline = require("readline");
 
 function make(param) {
-  return Readline.createInterface({
-              input: Process.stdin,
-              output: Process.stdout
-            });
+  return /* CommandLineIO */{
+          _0: Readline.createInterface({
+                input: Process.stdin,
+                output: Process.stdout
+              })
+        };
 }
 
 function prompt(rl, query, cb) {
+  var rl$1 = rl._0;
   return new Promise((function (resolve, _reject) {
-                  rl.question(query, (function (x) {
+                  rl$1.question(query, (function (x) {
                           resolve(x);
                         }));
                 })).then(Curry.__1(cb));
 }
 
 function on(rl, $$event, cb) {
-  return rl.on($$event, cb);
+  return /* CommandLineIO */{
+          _0: rl._0.on($$event, cb)
+        };
 }
 
 function close(rl) {
-  rl.close();
+  rl._0.close();
 }
 
 var CommandLineIOAlg = {

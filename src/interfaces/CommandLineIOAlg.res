@@ -1,15 +1,15 @@
 // So the user can provide Readline.Interface.t, as you want to keep the underlying implementation hidden from the logic that handles the sequencing
 // of the commandlineioalg and domainlogicalg function invocations.
-type commandLineIO<'a> = 'a
+type commandLineIO<'a> = CommandLineIO('a)
 
 // well Readline.make returns a Interface.t
 module type CommandLineIOAlg = {
     type t
 
-    let make : () => t
-    let prompt : t => string => (string =>  Promise.t<'a>) =>  Promise.t<'a>
-    let on : t => string => (() => ()) => t
-    let close : t => unit
+    let make : () => commandLineIO<t>
+    let prompt : commandLineIO<t> => string => (string =>  Promise.t<'a>) =>  Promise.t<'a>
+    let on : commandLineIO<t> => string => (() => ()) => commandLineIO<t>
+    let close : commandLineIO<t> => unit
 }
 // - Create a ReadLine instance which facilitates receiving from stdin and sending output back to the user via stdout (Readline.make and Readline.interfaceOptions)
 //   The test isntance of the stdin and stdout will need to maintain mutable state?

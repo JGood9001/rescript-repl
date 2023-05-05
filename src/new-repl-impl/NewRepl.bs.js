@@ -5,22 +5,32 @@ var Curry = require("rescript/lib/js/curry.js");
 
 function repl(CLIO, DL) {
   var cliInterface = Curry._3(CLIO.on, Curry._1(CLIO.make, undefined), "close", DL.cleanup);
-  var $$continue = {
-    contents: false
-  };
-  while($$continue.contents) {
+  var g = function (param) {
     Curry._3(CLIO.prompt, cliInterface, "\u03BB> ", DL.handleUserInput).then(function (cont_or_close) {
           return new Promise((function (resolve, _reject) {
                         if (cont_or_close) {
-                          $$continue.contents = false;
+                          console.log("See you Space Cowboy");
+                          Curry._1(CLIO.close, cliInterface);
                           return resolve(cont_or_close);
                         } else {
+                          g(undefined);
                           return resolve(cont_or_close);
                         }
                       }));
         });
   };
-  console.log("See you Space Cowboy");
+  Curry._3(CLIO.prompt, cliInterface, "\u03BB> ", DL.handleUserInput).then(function (cont_or_close) {
+        return new Promise((function (resolve, _reject) {
+                      if (cont_or_close) {
+                        console.log("See you Space Cowboy");
+                        Curry._1(CLIO.close, cliInterface);
+                        return resolve(cont_or_close);
+                      } else {
+                        g(undefined);
+                        return resolve(cont_or_close);
+                      }
+                    }));
+      });
 }
 
 exports.repl = repl;

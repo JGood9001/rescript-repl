@@ -1,14 +1,16 @@
 #! /usr/bin/env node
 // const { exec } = require("child_process");
-const { repl } = require("../src/Repl.bs.js")
+// const { repl } = require("../src/Repl.bs.js")
+const { run_repl } = require("../src/end-user-usage-of-interfaces/Example.bs.js")
 
 // NOTE:
 // Any changes in this file won't be reflected the next time you run:
 // $ resrepl
 // Unless you first run:
-// $ npm install -g . 
+// $ npm install -g .
 
-repl()
+// repl()
+run_repl()
 
 // // > eval("console.log('hello world')")
 // // hello world

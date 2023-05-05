@@ -229,3 +229,44 @@ let handle_close = (x: test_cli) => {
 
 let close = x => x->handle_close
 
+Conclusion of the blog post:
+What is gained from the tagless final approach for this particular problem?
+    - Clear separation of concerns
+    - The CLIO can be swapped out for a test implementation in order to drive the
+      repl using test input in order to exercise the DomainLogic implementation for
+      integration tests (since it will be making use of File IO and we might want to check
+      at certain stages if after a particular user input is provided via the test_Cli implementation
+      that a file (is created, deleted, has certain contents, removed contents, etc))
+
+Found an error in my code when I went to run everything
+module type CommandLineIOAlg = {
+    type t
+
+    // You can't return t here, instead, need to return 'a
+    // The compilation error received:
+    // This has type: CLIO.t
+        // Somewhere wanted: 'a
+        // The type constructor CLIO.t would escape its scope
+    let make : () => t
+    let prompt : t => string => (string =>  Promise.t<'a>) =>  Promise.t<'a>
+    let on : t => string => (() => ()) => t
+    let close : t => unit
+}
+
+TODO: Check forum/read ocaml stuff to see why this is the case.
+Hmm, so actually, using 'a in place of t doesn't work either, as the compiler errors
+will still fix Readline.Interface.t in place and complain that it isn't equal to 'a; this is also
+the case if you use
+type commandLineIO<'a> = CommandLineIO('a)
+and specify that make returns commandLineIO<'a> in the module type CommandLineIOAlg.
+However, what I would think wouldn't work (as t is still exposed...) is to use commandLineIO<t> in place of t within
+the module type... and somehow that still typechecks.
+
+Also, even though the typecheck passes, I still ran into a compilation error saying 't' would escape its scope, when I tried
+passing cliInterface as an argument to the mutually recursive function cont_repl (to get around this I'm going to see if I can make
+use of a higher order function and close over the value of cliInterface so that cont_repl can at least leverage that functionality)
+cliInterface: CommandLineIOAlg.commandLineIO<CLIO.t>
+
+Ended up just creating a mutually recursive function defined within repl in order to have cliInterface
+to be in scope for both.
+
