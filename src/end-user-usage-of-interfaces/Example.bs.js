@@ -3,9 +3,12 @@
 
 var Fs = require("fs");
 var Curry = require("rescript/lib/js/curry.js");
+var $$String = require("rescript/lib/js/string.js");
 var NewRepl = require("../new-repl-impl/NewRepl.bs.js");
 var Process = require("process");
+var Caml_obj = require("rescript/lib/js/caml_obj.js");
 var Readline = require("readline");
+var Js_string = require("rescript/lib/js/js_string.js");
 
 function make(param) {
   return /* CommandLineIO */{
@@ -42,15 +45,325 @@ var CommandLineIOAlg = {
   close: close
 };
 
+function match_str(match_str$1, input_str) {
+  return Js_string.slice(0, match_str$1.length, input_str) === match_str$1;
+}
+
+function char_to_string(c) {
+  return $$String.make(1, c);
+}
+
+function $$char(c) {
+  return /* Parser */{
+          runParser: (function (s) {
+              var string_first_el = Js_string.slice(0, 1, s);
+              var remaining_str = Js_string.slice(1, s.length, s);
+              if (string_first_el === $$String.make(1, c)) {
+                return [
+                        remaining_str,
+                        string_first_el
+                      ];
+              }
+              
+            })
+        };
+}
+
+function str(pattern) {
+  return /* Parser */{
+          runParser: (function (s) {
+              var start_str = Js_string.slice(0, pattern.length, s);
+              var remaining_str = Js_string.slice(pattern.length, s.length, s);
+              if (match_str(pattern, s)) {
+                return [
+                        remaining_str,
+                        start_str
+                      ];
+              }
+              
+            })
+        };
+}
+
+var space = /* Parser */{
+  runParser: (function (s) {
+      var start_str = Js_string.slice(0, 1, s);
+      var remaining_str = Js_string.slice(1, s.length, s);
+      if (" " === start_str) {
+        return [
+                remaining_str,
+                start_str
+              ];
+      }
+      
+    })
+};
+
+function cont_collect_until(_collected, _s, pattern) {
+  while(true) {
+    var s = _s;
+    var collected = _collected;
+    if (s.length === 0) {
+      return ;
+    }
+    var start_str = Js_string.slice(0, 1, s);
+    var remaining_str = Js_string.slice(1, s.length, s);
+    if (start_str === pattern) {
+      return [
+              start_str + remaining_str,
+              collected
+            ];
+    }
+    _s = remaining_str;
+    _collected = collected + start_str;
+    continue ;
+  };
+}
+
+function collect_until(s, pattern) {
+  var start_str = Js_string.slice(0, 1, s);
+  var remaining_str = Js_string.slice(1, s.length, s);
+  if (start_str === pattern) {
+    return [
+            start_str,
+            remaining_str
+          ];
+  } else {
+    return cont_collect_until(start_str, remaining_str, pattern);
+  }
+}
+
+function take_until(pattern) {
+  return /* Parser */{
+          runParser: (function (s) {
+              var match = collect_until(s, pattern);
+              if (match !== undefined) {
+                return [
+                        match[0],
+                        match[1]
+                      ];
+              }
+              
+            })
+        };
+}
+
+function fmap(f, p) {
+  return /* Parser */{
+          runParser: (function (s) {
+              var match = Curry._1(p.runParser, s);
+              if (match !== undefined) {
+                return [
+                        match[0],
+                        Curry._1(f, match[1])
+                      ];
+              }
+              
+            })
+        };
+}
+
+var ParserFunctor = {
+  fmap: fmap
+};
+
+function id(x) {
+  return x;
+}
+
+function pipe(g, f, x) {
+  return Curry._1(f, Curry._1(g, x));
+}
+
+function TestFunctor(F) {
+  var test_id = function (x) {
+    return Caml_obj.equal(Curry._2(F.fmap, id, x), x);
+  };
+  var test_compose = function (x) {
+    var f = function (x) {
+      return x % 2;
+    };
+    var g = function (x) {
+      return x - 1 | 0;
+    };
+    return Caml_obj.equal(Curry._2(F.fmap, (function (param) {
+                      return (param - 1 | 0) % 2;
+                    }), x), Curry._2(F.fmap, f, Curry._2(F.fmap, g, x)));
+  };
+  return {
+          test_id: test_id,
+          test_compose: test_compose
+        };
+}
+
+function test_id(x) {
+  return Caml_obj.equal(fmap(id, x), x);
+}
+
+function test_compose(x) {
+  var f = function (x) {
+    return x % 2;
+  };
+  var g = function (x) {
+    return x - 1 | 0;
+  };
+  return Caml_obj.equal(fmap((function (param) {
+                    return (param - 1 | 0) % 2;
+                  }), x), fmap(f, fmap(g, x)));
+}
+
+var TFP = {
+  test_id: test_id,
+  test_compose: test_compose
+};
+
+function pure(p) {
+  return /* Parser */{
+          runParser: (function (param) {
+              
+            })
+        };
+}
+
+function apply(pf, p) {
+  return /* Parser */{
+          runParser: (function (s) {
+              var match = Curry._1(pf.runParser, s);
+              if (match === undefined) {
+                return ;
+              }
+              var match$1 = Curry._1(p.runParser, match[0]);
+              if (match$1 !== undefined) {
+                return [
+                        match$1[0],
+                        Curry._1(match[1], match$1[1])
+                      ];
+              }
+              
+            })
+        };
+}
+
+var ParserApplicative = {
+  fmap: fmap,
+  pure: pure,
+  apply: apply
+};
+
+function compose(f, g, x) {
+  return Curry._1(f, Curry._1(g, x));
+}
+
+function TestApplicative(A) {
+  var test_id = function (x) {
+    return Caml_obj.equal(Curry._2(A.apply, Curry._1(A.pure, id), x), x);
+  };
+  var test_hom = function (f, x) {
+    return Caml_obj.equal(Curry._2(A.apply, Curry._1(A.pure, f), Curry._1(A.pure, x)), Curry._1(A.pure, Curry._1(f, x)));
+  };
+  var test_interchange = function (u, y) {
+    return Caml_obj.equal(Curry._2(A.apply, u, Curry._1(A.pure, y)), Curry._2(A.apply, Curry._1(A.pure, (function (f) {
+                          return Curry._1(f, y);
+                        })), u));
+  };
+  var test_composition = function (u, v, w) {
+    return Caml_obj.equal(Curry._2(A.apply, Curry._2(A.apply, Curry._2(A.apply, Curry._1(A.pure, compose), u), v), w), Curry._2(A.apply, u, Curry._2(A.apply, v, w)));
+  };
+  return {
+          test_id: test_id,
+          test_hom: test_hom,
+          test_interchange: test_interchange,
+          test_composition: test_composition
+        };
+}
+
+function test_id$1(x) {
+  return Caml_obj.equal(apply(/* Parser */{
+                  runParser: (function (param) {
+                      
+                    })
+                }, x), x);
+}
+
+function test_hom(f, x) {
+  return Caml_obj.equal(apply(/* Parser */{
+                  runParser: (function (param) {
+                      
+                    })
+                }, /* Parser */{
+                  runParser: (function (param) {
+                      
+                    })
+                }), (Curry._1(f, x), /* Parser */{
+                runParser: (function (param) {
+                    
+                  })
+              }));
+}
+
+function test_interchange(u, y) {
+  return Caml_obj.equal(apply(u, /* Parser */{
+                  runParser: (function (param) {
+                      
+                    })
+                }), apply(/* Parser */{
+                  runParser: (function (param) {
+                      
+                    })
+                }, u));
+}
+
+function test_composition(u, v, w) {
+  return Caml_obj.equal(apply(apply(apply(/* Parser */{
+                          runParser: (function (param) {
+                              
+                            })
+                        }, u), v), w), apply(u, apply(v, w)));
+}
+
+var TAP = {
+  test_id: test_id$1,
+  test_hom: test_hom,
+  test_interchange: test_interchange,
+  test_composition: test_composition
+};
+
+var load_p = apply(apply(apply(fmap((function (param, param$1, filename, ext) {
+                    return /* LoadModule */{
+                            _0: filename + ext
+                          };
+                  }), str(":load")), space), take_until(".")), str(".res"));
+
+var load_start_p = str(":load");
+
+function parseReplCommand(p, s) {
+  return Curry._1(p.runParser, s);
+}
+
 function handleUserInput(s) {
   return new Promise((function (resolve, _reject) {
+                var match = Curry._1(load_p.runParser, s);
+                if (match !== undefined) {
+                  console.log("REMAINING:");
+                  console.log(match[0]);
+                  console.log("PARSED:");
+                  console.log(match[1]);
+                } else {
+                  console.log("PARSED NOTHING!!!!!!");
+                }
                 resolve(/* Close */1);
               }));
 }
 
 function cleanup(param) {
-  Fs.unlinkSync("./src/RescriptRepl.res");
-  Fs.unlinkSync("./src/RescriptRepl.bs.js");
+  try {
+    Fs.unlinkSync("./src/RescriptRepl.res");
+    Fs.unlinkSync("./src/RescriptRepl.bs.js");
+    return ;
+  }
+  catch (exn){
+    return ;
+  }
 }
 
 var DomainLogicAlg = {
@@ -63,6 +376,26 @@ function run_repl(param) {
 }
 
 exports.CommandLineIOAlg = CommandLineIOAlg;
+exports.match_str = match_str;
+exports.char_to_string = char_to_string;
+exports.$$char = $$char;
+exports.str = str;
+exports.space = space;
+exports.collect_until = collect_until;
+exports.cont_collect_until = cont_collect_until;
+exports.take_until = take_until;
+exports.ParserFunctor = ParserFunctor;
+exports.id = id;
+exports.pipe = pipe;
+exports.TestFunctor = TestFunctor;
+exports.TFP = TFP;
+exports.ParserApplicative = ParserApplicative;
+exports.compose = compose;
+exports.TestApplicative = TestApplicative;
+exports.TAP = TAP;
+exports.load_p = load_p;
+exports.load_start_p = load_start_p;
+exports.parseReplCommand = parseReplCommand;
 exports.DomainLogicAlg = DomainLogicAlg;
 exports.run_repl = run_repl;
-/* fs Not a pure module */
+/* load_p Not a pure module */
