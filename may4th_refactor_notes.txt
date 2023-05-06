@@ -270,3 +270,23 @@ cliInterface: CommandLineIOAlg.commandLineIO<CLIO.t>
 Ended up just creating a mutually recursive function defined within repl in order to have cliInterface
 to be in scope for both.
 
+// Day 3
+Want to start implementing the parsing of user input in the domain logic section.
+Supported input:
+    - arbitrary rescript code (where if successful the results are appended to a file RescriptRepl.res and npm run res:build is executed
+      if build fails then the file is rolled back to it's previous state; suppress warnings emitted from res:build)
+    - multiline mode
+    - load a module (if the module has any dependencies, then a tree needs to be built up (to capture the order in which the contents should be written
+      to the RescriptRes file))
+    
+https://forum.rescript-lang.org/t/why-does-rescript-syntax-not-use-a-parser-combinator-approach/1496/4
+https://forum.rescript-lang.org/t/parser-combinators-reasonable-approach-with-rescript/2219/4
+https://gist.github.com/ryyppy/c86cce0c7699ef1d22f55c9de96e8f3b
+https://troydm.github.io/blog/2014/03/29/writing-micro-compiler-in-ocaml/
+Using the parser combinators approach
+https://github.com/resinfo/rescript-parser
+https://github.com/resinfo/rescript-parser/blob/main/src/res_parser.res#L101
+And another one
+https://github.com/inhabitedtype/angstrom
+
+
