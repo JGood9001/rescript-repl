@@ -1,7 +1,7 @@
 #! /usr/bin/env node
 // const { exec } = require("child_process");
 // const { repl } = require("../src/Repl.bs.js")
-const { run_repl } = require("../src/end-user-usage-of-interfaces/Example.bs.js")
+const { run_repl } = require("../src/ReplV2.bs.js")
 
 // NOTE:
 // Any changes in this file won't be reflected the next time you run:
