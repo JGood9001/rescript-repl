@@ -1,53 +1,48 @@
 open CommandLineIOAlg
 open DomainLogicAlg
 
-let repl = (module (CLIO : CommandLineIOAlg), module (DL : DomainLogicAlg)) => {
+let handle_cont_or_close = (cont_or_close, cont, close): Promise.t<cont_or_close> => {
+    Promise.make((resolve, _reject) => {
+        switch cont_or_close {
+            | Continue => {
+                cont()->Promise.then(_ => Promise.make((res, _rej) => res(. ())))->ignore // the Promise.then becomes necessary because the recursive function is async... now
+                resolve(. cont_or_close)
+            }
+            | Close => {
+                Js.log("See you Space Cowboy")
+                close()
+                resolve(. cont_or_close)
+            }
+        }
+    })
+}
+
+let repl = async (module (CLIO : CommandLineIOAlg), module (DL : DomainLogicAlg)) => {
     let cliInterface = CLIO.on(CLIO.make(), "close", DL.cleanup)
-    
-    let rec start = () => {
-        CLIO.prompt(cliInterface, "\u03BB> ", DL.handleUserInput)
-        ->Promise.then(cont_or_close => {
-            Promise.make(
-                (resolve, _reject) => {
-                    switch cont_or_close {
-                        | Continue => {
-                            cont()
-                            resolve(. cont_or_close)
-                        }
-                        | Close => {
-                            Js.log("See you Space Cowboy")
-                            CLIO.close(cliInterface)
-                            resolve(. cont_or_close)
-                        }
-                    }
-                }
-            ) // End Promise.make
-        }) // End Promise.then
-        -> ignore
-    } and cont = () => {
-        CLIO.prompt(cliInterface, "\u03BB> ", DL.handleUserInput)
-        ->Promise.then(cont_or_close => {
-            Promise.make(
-                (resolve, _reject) => {
-                    switch cont_or_close {
-                        | Continue => {
-                            cont()
-                            resolve(. cont_or_close)
-                        }
-                        | Close => {
-                            Js.log("See you Space Cowboy")
-                            CLIO.close(cliInterface)
-                            resolve(. cont_or_close)
-                        }
-                    }
-                }
-            ) // End Promise.make
-        }) // End Promise.then
-        -> ignore
+    let close = () => CLIO.close(cliInterface)
+    let prompt = async () => await CLIO.prompt(cliInterface, "\u03BB> ", DL.handleUserInput) 
+
+    let rec run_loop: () => Promise.t<cont_or_close> = async () => {
+        let cont_or_close = await prompt()
+        await handle_cont_or_close(cont_or_close, run_loop, close)
     }
 
-    start()
+    await run_loop()
 }
+
+// before switching to async await:
+// let repl = (module (CLIO : CommandLineIOAlg), module (DL : DomainLogicAlg)) => {
+//     let cliInterface = CLIO.on(CLIO.make(), "close", DL.cleanup)
+//     let close = () => CLIO.close(cliInterface)
+
+//     let rec run_loop = () => {
+//          CLIO.prompt(cliInterface, "\u03BB> ", DL.handleUserInput)
+//         ->Promise.then(cont_or_close => handle_cont_or_close(cont_or_close, run_loop, close))
+//         -> ignore
+//     }
+
+//     run_loop()
+// }
 
 //     // All right... now due to DomainLogicAlg (the implementation specific to rescript repl) needing to handle file operations
 //     // I really don't know how to go about implementing it such that there would be instances for both prod/test.

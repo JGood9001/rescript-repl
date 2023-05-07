@@ -1,9 +1,9 @@
 {
   "name": "rescript-repl",
-  "sources": {
-    "dir": "src",
-    "subdirs": true
-  },
+  "sources": [
+    { "dir": "src", "subdirs": true },
+    { "dir": "tests", "subdirs": true, "type": "dev" }
+  ],
   "package-specs": {
     "module": "commonjs",
     "in-source": true
@@ -11,6 +11,8 @@
   "suffix": ".bs.js",
   "bs-dependencies": [
     "rescript-nodejs",
-    "@ryyppy/rescript-promise"
+    "@ryyppy/rescript-promise",
+    "rescript-test",
+    "rescript-fast-check"
   ]
 }

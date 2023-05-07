@@ -7,7 +7,7 @@ module type CommandLineIOAlg = {
     type t
 
     let make : () => commandLineIO<t>
-    let prompt : commandLineIO<t> => string => (string =>  Promise.t<'a>) =>  Promise.t<'a>
+    let prompt : commandLineIO<t> => string => (string =>  Promise.t<'a>) => Promise.t<'a>
     let on : commandLineIO<t> => string => (() => ()) => commandLineIO<t>
     let close : commandLineIO<t> => unit
 }
