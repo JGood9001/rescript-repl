@@ -1,33 +1,50 @@
 open CommandLineIOAlg
 open DomainLogicAlg
 
-let handle_cont_or_close = (cont_or_close, cont, close): Promise.t<cont_or_close> => {
-    Promise.make((resolve, _reject) => {
-        switch cont_or_close {
-            | Continue => {
-                cont()->Promise.then(_ => Promise.make((res, _rej) => res(. ())))->ignore // the Promise.then becomes necessary because the recursive function is async... now
-                resolve(. cont_or_close)
-            }
-            | Close => {
-                Js.log("See you Space Cowboy")
-                close()
-                resolve(. cont_or_close)
-            }
-        }
-    })
-}
+// let handleContOrClose = (contOrClose, cont, close) => { //: Promise.t<cont_or_close<DomainLogicAlg.state<DomainLogicAlg.t>>> => {
+//     Promise.make((resolve, _reject) => {
+//         switch contOrClose {
+//             | Continue(s) => { // : DomainLogicAlg.state<DomainLogicAlg.t>
+//                 cont(s)->Promise.then(_ => Promise.make((res, _rej) => res(. ())))->ignore // the Promise.then becomes necessary because the recursive function is async... now
+//                 resolve(. contOrClose)
+//             }
+//             | Close => {
+//                 Js.log("See you Space Cowboy")
+//                 close()
+//                 resolve(. contOrClose)
+//             }
+//         }
+//     })
+// }
+
+// LLO
+// DOn't think it's ideal to have to specify type t here for DL, so I should instead create more functions on DL which handle the repl loop flow
+// In a start_repl function...
+// let repl = async (module (CLIO : CommandLineIOAlg), module (DL : DomainLogicAlg with type t = DomainLogicAlg.domain_logic_state)) => {
+//     let cliInterface = CLIO.on(CLIO.make(), "close", DL.cleanup)
+//     let close = () => CLIO.close(cliInterface)
+//     // : DomainLogicAlg.state<DomainLogicAlg.t>
+//     let prompt = async (s) => await CLIO.prompt(cliInterface, "\u03BB> ", DL.handleUserInput(s))
+
+//     let state = DL.make()
+
+//     // If you add that type t to DomainLogicAlg, then creating it and passing it through the recursive
+//     // invocations of run_loop will be necessary to maintain the running state.
+//     // : DomainLogicAlg.state<DomainLogicAlg.t>
+//     let rec run_loop = async (s) => {
+//         let contOrClose = await prompt(s)
+//         await handleContOrClose(contOrClose, run_loop, close)
+//     }
+
+//     await run_loop(state)
+// }
 
 let repl = async (module (CLIO : CommandLineIOAlg), module (DL : DomainLogicAlg)) => {
     let cliInterface = CLIO.on(CLIO.make(), "close", DL.cleanup)
     let close = () => CLIO.close(cliInterface)
-    let prompt = async () => await CLIO.prompt(cliInterface, "\u03BB> ", DL.handleUserInput) 
-
-    let rec run_loop: () => Promise.t<cont_or_close> = async () => {
-        let cont_or_close = await prompt()
-        await handle_cont_or_close(cont_or_close, run_loop, close)
-    }
-
-    await run_loop()
+    let prompt = async (s) => await CLIO.prompt(cliInterface, "\u03BB> ", DL.handleUserInput(s))
+    (await DL.start_repl(prompt, close))->ignore
+    Promise.make((resolve, _reject) => resolve(. ()))
 }
 
 // before switching to async await:

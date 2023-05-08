@@ -3,38 +3,19 @@
 
 var Curry = require("rescript/lib/js/curry.js");
 
-function handle_cont_or_close(cont_or_close, cont, close) {
-  return new Promise((function (resolve, _reject) {
-                if (cont_or_close) {
-                  console.log("See you Space Cowboy");
-                  Curry._1(close, undefined);
-                  return resolve(cont_or_close);
-                } else {
-                  Curry._1(cont, undefined).then(function (param) {
-                        return new Promise((function (res, _rej) {
-                                      res(undefined);
-                                    }));
-                      });
-                  return resolve(cont_or_close);
-                }
-              }));
-}
-
 async function repl(CLIO, DL) {
   var cliInterface = Curry._3(CLIO.on, Curry._1(CLIO.make, undefined), "close", DL.cleanup);
   var close = function (param) {
     Curry._1(CLIO.close, cliInterface);
   };
-  var prompt = async function (param) {
-    return await Curry._3(CLIO.prompt, cliInterface, "\u03BB> ", DL.handleUserInput);
+  var prompt = async function (s) {
+    return await Curry._3(CLIO.prompt, cliInterface, "\u03BB> ", Curry._1(DL.handleUserInput, s));
   };
-  var run_loop = async function (param) {
-    var cont_or_close = await prompt(undefined);
-    return await handle_cont_or_close(cont_or_close, run_loop, close);
-  };
-  return await run_loop(undefined);
+  await Curry._2(DL.start_repl, prompt, close);
+  return new Promise((function (resolve, _reject) {
+                resolve(undefined);
+              }));
 }
 
-exports.handle_cont_or_close = handle_cont_or_close;
 exports.repl = repl;
 /* No side effect */

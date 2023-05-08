@@ -11,6 +11,7 @@ module type CommandLineIOAlg = {
     let on : commandLineIO<t> => string => (() => ()) => commandLineIO<t>
     let close : commandLineIO<t> => unit
 }
+
 // - Create a ReadLine instance which facilitates receiving from stdin and sending output back to the user via stdout (Readline.make and Readline.interfaceOptions)
 //   The test isntance of the stdin and stdout will need to maintain mutable state?
 // - Finally, Clean up upon "close" event being initiated via Ctrl+D | Ctrl+C sent by the user

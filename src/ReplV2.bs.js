@@ -3,15 +3,10 @@
 
 var Fs = require("fs");
 var Curry = require("rescript/lib/js/curry.js");
-var Js_exn = require("rescript/lib/js/js_exn.js");
-var Parser = require("./repl-commands-parser/Parser.bs.js");
 var NewRepl = require("./new-repl-impl/NewRepl.bs.js");
 var Process = require("process");
-var Js_array = require("rescript/lib/js/js_array.js");
 var Readline = require("readline");
-var Caml_array = require("rescript/lib/js/caml_array.js");
-var Belt_Option = require("rescript/lib/js/belt_Option.js");
-var ParserCombinators = require("./repl-commands-parser/ParserCombinators.bs.js");
+var REPLLogic = require("./repl-logic/REPLLogic.bs.js");
 
 function make(param) {
   return /* CommandLineIO */{
@@ -48,34 +43,21 @@ var CommandLineIOAlg = {
   close: close
 };
 
-function parseReplCommand(s) {
-  var xs = [
-    Parser.parseReplCommand(ParserCombinators.loadCommandP, s),
-    Parser.parseReplCommand(ParserCombinators.startMultiLineCommandP, s),
-    Parser.parseReplCommand(ParserCombinators.endMultiLineCommandP, s)
-  ];
-  var ys = Js_array.filter(Belt_Option.isSome, xs);
-  if (ys.length === 0) {
-    return {
-            TAG: /* RescriptCode */0,
-            _0: s
-          };
-  }
-  var match = Caml_array.get(ys, 0);
-  if (match !== undefined) {
-    return match[1];
-  } else {
-    return Js_exn.raiseError("INVARIANT VIOLATION: Impossible state, Nones were filtered out of the array prior to this section of the code");
-  }
+function make$1(param) {
+  return {
+          multiline_mode: {
+            active: false,
+            rescipe_code_input: undefined
+          },
+          prev_file_contents_state: undefined
+        };
 }
 
-function handleUserInput(s) {
-  return new Promise((function (resolve, _reject) {
-                parseReplCommand(s);
-                resolve(/* Continue */0);
-                resolve(/* Close */1);
-              }));
+function start_repl(prompt, close) {
+  return REPLLogic.start_repl(make$1, prompt, close);
 }
+
+var handleUserInput = REPLLogic.parseAndHandleCommands;
 
 function cleanup(param) {
   try {
@@ -89,16 +71,22 @@ function cleanup(param) {
 }
 
 var DomainLogicAlg = {
+  make: make$1,
+  start_repl: start_repl,
   handleUserInput: handleUserInput,
   cleanup: cleanup
 };
 
 function run_repl(param) {
-  return NewRepl.repl(CommandLineIOAlg, DomainLogicAlg);
+  return NewRepl.repl(CommandLineIOAlg, {
+              make: make$1,
+              handleUserInput: handleUserInput,
+              start_repl: start_repl,
+              cleanup: cleanup
+            });
 }
 
 exports.CommandLineIOAlg = CommandLineIOAlg;
-exports.parseReplCommand = parseReplCommand;
 exports.DomainLogicAlg = DomainLogicAlg;
 exports.run_repl = run_repl;
 /* fs Not a pure module */
