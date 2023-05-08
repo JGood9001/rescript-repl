@@ -2,8 +2,6 @@ open NodeJs
 open CommandLineIOAlg
 open DomainLogicAlg
 open NewRepl
-open Parser
-open ParserCombinators
 
 @module("fs") external unlinkSync: string => () = "unlinkSync"
 
@@ -48,53 +46,22 @@ module CommandLineIOAlg = {
 // ":load filename.res" => LoadModule(filename.res)
 // s => RescriptCode(s)
 
-
-let parseReplCommand = s => {
-    let xs = [
-        Parser.parseReplCommand(loadCommandP, s),
-        Parser.parseReplCommand(startMultiLineCommandP, s),
-        Parser.parseReplCommand(endMultiLineCommandP, s)
-    ]
-    let ys = Js.Array.filter(x => Belt.Option.isSome(x), xs)
-
-    if Belt.Array.length(ys) == 0 {
-        REPLCommands.RescriptCode(s)
-    } else {
-        switch ys[0] {
-            | Some((_, x)) => x
-            | _ => Js.Exn.raiseError("INVARIANT VIOLATION: Impossible state, Nones were filtered out of the array prior to this section of the code")
-        }
-    }
-}
-
 module DomainLogicAlg = {
-    let handleUserInput = (s: string) => {
-        Promise.make((resolve, _reject) => {
-            switch parseReplCommand(s) {
-                | StartMultiLineMode => {
-                    // TODO: Update state to reflect entering multiline mode
-                    // will need to modify some state to indicate that future lines should be appended to a string stored on state
-                    resolve(. Continue)
-                }
-                | EndMultiLineMode => {
-                    // TODO: Update state to reflect exiting multiline mode and
-                    // persist and build entered rescript code
-                    // will need to retrieve appended string from state, append it to file and run the res:build/rollback procedure
-                    resolve(. Continue)
-                }
-                | LoadModule(_filename) => {
-                    // TODO: Load rescript file and all of the specified dependencies in their necessary order.
-                    resolve(. Continue)
-                }
-                | RescriptCode(_s) => {
-                    // TODO
-                    resolve(. Continue)
-                }
-            }
+    type t = DomainLogicAlg.domain_logic_state
 
-            resolve(. Close)
-        })
+    let make = () => {
+        multiline_mode: {
+            active: false,
+            rescipe_code_input: None,
+        },
+        prev_file_contents_state: None,
     }
+
+    let start_repl = (prompt, close) =>
+        REPLLogic.start_repl(make, prompt, close)
+
+    let handleUserInput = state => (s: string) =>
+        REPLLogic.parseAndHandleCommands(state, s)
 
     let cleanup = () => {
         // https://nodejs.org/api/fs.html#fsaccesssyncpath-mode
