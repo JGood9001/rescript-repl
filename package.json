@@ -3,6 +3,7 @@
   "version": "0.0.1",
   "scripts": {
     "res:build": "rescript",
+    "res:build-help": "rescript build -h",
     "res:clean": "rescript clean",
     "res:dev": "rescript build -w",
     "test": "rescript build -with-deps && retest tests/**/*.bs.js"
