@@ -1,14 +1,6 @@
 open Parser
 open REPLCommands
-
-// λ> (Js.String.slice(~from=2, ~to_=5, "abcdefg") == "cde")->Js.log
-// λ> true
-
-let splitAt = (s: string, idx: int): (string, string) => {
-    let x = Js.String.slice(~from=0, ~to_=idx, s)
-    let y = Js.String.slice(~from=idx, ~to_=Js.String.length(s), s)
-    (x, y)
-}
+open Utils
 
 // λ> matchStr(":{", ":{and the rest of the string")->Js.log
 // λ> true
@@ -71,12 +63,18 @@ let takeUntil = (pattern: string): parser<string> =>
         }
     }})
 
+let rescriptFileP: parser<(string, string)> =
+    ((filename, ext) => (filename, ext))
+    ->ParserApplicative.fmap(takeUntil("."))
+    ->ParserApplicative.apply(str(".res"))
+
 let loadCommandP: parser<replCommand> = {
-    ((_, _, filename, ext) => LoadModule(filename ++ ext))
+    ((_, _, (filename, ext)) => LoadModule(filename ++ ext))
     ->ParserApplicative.fmap(str(":load"))
     ->ParserApplicative.apply(space)
-    ->ParserApplicative.apply(takeUntil("."))
-    ->ParserApplicative.apply(str(".res"))
+    ->ParserApplicative.apply(rescriptFileP)
+    // ->ParserApplicative.apply(takeUntil("."))
+    // ->ParserApplicative.apply(str(".res"))
 }
 
 let startMultiLineCommandP: parser<replCommand> =
@@ -84,3 +82,25 @@ let startMultiLineCommandP: parser<replCommand> =
 
 let endMultiLineCommandP: parser<replCommand> =
     ((_, _) => EndMultiLineMode)->ParserApplicative.fmap(str("}:"))->ParserApplicative.apply(empty)
+
+let rescriptCodeStartsWithJsLogP: parser<string> =
+    (x => x)->ParserApplicative.fmap(str("Js.log"))
+
+// Ahhh... for these "ends with" parsers
+// you need the some function on applicative.
+// ^^ TODO/LLO:
+// Implement this, as it's what is currently breaking the REPL flow for what I implemented in REPLLogic.res
+let rescriptCodeEndsWithJsLogP: parser<string> =
+    ((x, _) => x)->ParserApplicative.fmap(ParserAlternative.some(str("->Js.log")))->ParserApplicative.apply(empty)
+
+let rescriptCodeStartsOrEndsWithJsLogP: parser<string> =
+    ParserAlternative.alternative(rescriptCodeStartsWithJsLogP, rescriptCodeEndsWithJsLogP) // compose(string("->Js.log"), empty))
+
+let rescriptFileP: parser<string> =
+    ((x, _) => x)->ParserApplicative.fmap(ParserAlternative.some(str(".res")))->ParserApplicative.apply(empty)
+
+let javascriptFileP: parser<string> =
+    ((x, _) => x)->ParserApplicative.fmap(ParserAlternative.some(str(".bs.js")))->ParserApplicative.apply(empty)
+
+let rescriptJavascriptFileP =
+    ParserAlternative.alternative(rescriptFileP, javascriptFileP)

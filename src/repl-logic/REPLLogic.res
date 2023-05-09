@@ -8,46 +8,128 @@ open DomainLogicAlg
 @module("fs") external writeFileSync: string => string => () = "writeFileSync"
 external eval: string => () = "eval"
 
-// write("./src/RescriptRepl.res", next_contents)
-// build_rescript_code(prev_contents, eval_js_code)
-
-let eval_js_code = () => {
-    try {
-        let contents = readFileSync("./src/RescriptRepl.bs.js", "utf8")
-        eval(contents)
-    } catch {
-        | _ => Js.log("ERROR: Failed to evalutate code, eval_js_code must not have been able to read RescriptRepl.bs.js")
-    }
-}
-
 // https://github.com/TheSpyder/rescript-nodejs/blob/main/src/ChildProcess.res#L81
 // external exec: (string, (Js.nullable<Js.Exn.t>, Buffer.t, Buffer.t) => unit) => t = "exec"
-let build_rescript_code = (prev_contents, f) => {
-    ChildProcess.exec("npm run res:build", (error, stdout, stderr) => {
-        if (!Js.isNullable(error)) {
-            // https://rescript-lang.org/docs/manual/latest/api/js/nullable#bind
-            Js.Nullable.bind(error, (. error_str) => {
-                switch error_str -> Js.Exn.message {
-                    | Some(msg) => {
-                        Js.log("ERROR: " ++ msg)
-                        // TODO: Will need to see if I can improve highlighting the error later, but for now
-                        // this at least outputs whether the build succeeded/failed and will highlight the error
-                        // that caused it within the RescriptRepl.res file.
-                        Js.log("stdout: " ++ Buffer.toString(stdout))
+// let build_rescript_code = (prev_contents, f) => {
+//     // NOTE: I thought there was a way to suppress warnings, but that doesn't seem to be the case.
+//     // https://rescript-lang.org/docs/manual/latest/build-overview
+//     ChildProcess.exec("npm run res:build", (error, stdout, stderr) => {
+//         if (!Js.isNullable(error)) {
+//             // https://rescript-lang.org/docs/manual/latest/api/js/nullable#bind
+//             Js.Nullable.bind(error, (. error_str) => {
+//                 switch error_str -> Js.Exn.message {
+//                     | Some(msg) => {
+//                         Js.log("ERROR: " ++ msg)
+//                         // TODO: Will need to see if I can improve highlighting the error later, but for now
+//                         // this at least outputs whether the build succeeded/failed and will highlight the error
+//                         // that caused it within the RescriptRepl.res file.
+//                         Js.log("stdout: " ++ Buffer.toString(stdout))
 
-                        // Rollback to last successful file build
-                        writeFileSync("./src/RescriptRepl.res", prev_contents) -> ignore
+//                         // Rollback to last successful file build
+//                         writeFileSync("./src/RescriptRepl.res", prev_contents) -> ignore
+//                     }
+//                     | None => ()
+//                 }
+//             }) -> ignore
+//         } else {
+//             f()
+//         }
+//     })
+// }
+
+type rescriptBuildResult = BuildSuccess | BuildFail
+
+module type RescriptBuild = {
+    type t = rescriptBuildResult
+    let build: () => Promise.t<rescriptBuildResult>
+}
+
+// returning a promise becomes necessary here, as the return type of ChildProcess.exec is NodeJs.ChildProcess.t (but double check the source code)
+let build = () => {
+    Promise.make((resolve, _reject) => {
+        ChildProcess.exec("npm run res:build", (error, stdout, stderr) => {
+            if (!Js.isNullable(error)) {
+                // https://rescript-lang.org/docs/manual/latest/api/js/nullable#bind
+                Js.Nullable.bind(error, (. error_str) => {
+                    switch error_str -> Js.Exn.message {
+                        | Some(msg) => {
+                            Js.log("ERROR: " ++ msg)
+                            Js.log("stdout: " ++ Buffer.toString(stdout))
+                            resolve(. BuildFail)
+                        }
+                        | None => resolve(. BuildFail)
                     }
-                    | None => ()
-                }
-            }) -> ignore
-        } else {
-            f()
-        }
+                }) -> ignore
+            } else {
+                resolve(. BuildSuccess)
+            }
+        })->ignore
     })
 }
 
+module RescriptBuild = {
+    type t = rescriptBuildResult
+    let build = build
+}
 
+// NOTE: In this version, I'd prefer to just passs in the js code string, rather than having to read the file.
+// That way it can come directly from a BuildSuccess(js_code_str) result, and elimintate the possibility of eval erroring out.
+
+// I guess these would all become first class module arguments to NewRepl.res' repl/2 function? (making it then repl/5...)
+// Or should I just straight up have these be passed through the DomainLogicAlg?
+type filepath = Filepath(string)
+
+module type FileOperations = {
+    let read: filepath => string
+    let write: filepath => string => ()
+}
+
+let isFilepath = (s: string): bool => {
+    switch Parser.runParser(rescriptJavascriptFileP, s) {
+        | Some(_) => true
+        | None => false
+    }
+}
+
+module FileOperations = {
+    let write = (Filepath(s), contents) => writeFileSync(s, contents)
+    // if read fails, then just create ReScriptREPL.res and then return the empty string
+    let read = (Filepath(s)) => {
+        // So long as the string passed in refers to a filepath, then the only case
+        // which throws an exception is where the file doesn't exist.
+        if isFilepath(s) {
+            try {
+                readFileSync(s, "utf8")
+            } catch {
+                | _ => {
+                    write(Filepath(s), "")
+                    ""
+                }
+            }
+        } else {
+            write(Filepath(s), "")
+            ""
+        }
+    }
+}
+
+type javaScriptCode = JavaScriptCode(string)
+
+module type EvalJavaScriptCode = {
+    let eval: javaScriptCode => ()
+}
+
+let eval_js_code = (JavaScriptCode(code)) => {
+    try {
+        eval(code)
+    } catch {
+        | _ => Js.log("ERROR: Failed to evalutate the following JavaScript code: \n" ++ code)
+    }
+}
+
+module EvalJavaScriptCode = {
+    let eval = eval_js_code
+}
 
 // ---------------------------------------------------------------------
 
@@ -70,7 +152,6 @@ let handleContOrClose = (contOrClose, cont, close) => {
 
 let start_repl = async (make, prompt, close) => {
     let state = make()
-    writeFileSync("./src/RescriptRepl.res", "")
 
     let rec run_loop = async (s) => {
         let contOrClose = await prompt(s)
@@ -85,9 +166,9 @@ let start_repl = async (make, prompt, close) => {
 // parseReplCommand(loadCommandP, s) <|> parseReplCommand(startMultiLineCommandP, s) <|> Parser.parseReplCommand(endMultiLineCommandP, s) <|> Some(RescriptCode(s))
 let parseReplCommand = s => {
     let xs = [
-        Parser.parseReplCommand(loadCommandP, s),
-        Parser.parseReplCommand(startMultiLineCommandP, s),
-        Parser.parseReplCommand(endMultiLineCommandP, s)
+        Parser.runParser(loadCommandP, s),
+        Parser.runParser(startMultiLineCommandP, s),
+        Parser.runParser(endMultiLineCommandP, s)
     ]
     let ys = Js.Array.filter(x => Belt.Option.isSome(x), xs)
 
@@ -101,11 +182,40 @@ let parseReplCommand = s => {
     }
 }
 
-// I also had a :reset command in the first version which would
-// wipe the file clean...
-// let parseAndHandleCommands = (state: DomainLogicAlg.state<DomainLogicAlg.t>) => (s: string) => {
-    // : DomainLogicAlg.t <- compilation error when annotating state below with this...
-let parseAndHandleCommands = (state: domain_logic_state) => (s: string) => {
+let startsOrEndsWithJsLog = (s: string): bool => {
+    switch Parser.runParser(rescriptCodeStartsOrEndsWithJsLogP, s) {
+        | Some(_) => true
+        | None => false
+    }
+}
+
+let handleBuildAndEval = (code_str, module(FO : FileOperations), module(RB : RescriptBuild), module(EvalJS : EvalJavaScriptCode)) => {
+    let prevContents = FO.read(Filepath("src/RescriptREPL.res"))
+    FO.write(Filepath("./src/RescriptREPL.res"), prevContents ++ "\n" ++ code_str)
+    RB.build()
+    -> Promise.then(result => {
+        Promise.make((resolve, _reject) => {
+            switch result {
+                | BuildFail => {
+                    // Rolling back the contents of RescriptREPL.res to the previous contents
+                    FO.write(Filepath("./src/RescriptREPL.res"), prevContents)
+                    resolve(. ())
+                }
+                | BuildSuccess => {
+                    let jsCodeStr = FO.read(Filepath("./src/RescriptREPL.bs.js"))
+                    EvalJS.eval(JavaScriptCode(jsCodeStr))
+                    if startsOrEndsWithJsLog(code_str) {
+                        FO.write(Filepath("./src/RescriptREPL.res"), prevContents)
+                    }
+                    resolve(. ())
+                }
+            }
+        })
+    })->ignore
+}
+
+// I also had a :reset command in the first version which would wipe the file clean...
+let parseAndHandleCommands = (state: domain_logic_state, s: string, module(FO : FileOperations), module(RB : RescriptBuild), module(EvalJS : EvalJavaScriptCode)) => {
     Promise.make((resolve, _reject) => {
         switch parseReplCommand(s) {
             | StartMultiLineMode => {
@@ -127,69 +237,9 @@ let parseAndHandleCommands = (state: domain_logic_state) => (s: string) => {
                 resolve(. DomainLogicAlg.Continue(state))
             }
             | RescriptCode(code_str) => {
-                // Well... if I take the approach of just straight up doing file IO in here, then I lose testability (of swapping in test instances of anything)
-                // For files it's easy enough to see how you'd might create a test instance.
-                // For the ReScript build step, it's less so (but I do imagine some function which returns a RescriptBuildStatus = Success | Fail where
-                // the function that returns ReScriptBuildStatus could be a prod instance (actually executing the Node ChildProcess npm run res:build command or
-                // version which implements a test instance of it in order to be able to test that the rest of the flow results in an expected (domain_logic_state)
-                // being yielded in both prod/test scenarios))
-
-                // ^^ Top priority to actually make it that way...
-                Js.log("RescriptCode")
-                let prev_contents = readFileSync("./src/RescriptRepl.res", "utf8")
-                writeFileSync("./src/RescriptRepl.res", prev_contents ++ "\n" ++ code_str)
-                build_rescript_code(prev_contents, eval_js_code)->ignore
-                
-                // TODO: Need to make parsers for these cases
-                // cases where the contents of the file will be rolled back even when the build is successful:
-                // 1. Js.log....restofstring
-                // 2. beginningofstring...->Js.log
+                handleBuildAndEval(code_str, module(FO), module(RB), module(EvalJS))
                 resolve(. DomainLogicAlg.Continue(state))
             }
         }
     })
 }
-
-// I guess these would all become first class module arguments to NewRepl.res' repl/2 function? (making it then repl/5...)
-// Or should I just straight up have these be passed through the DomainLogicAlg?
-// module type FileIO = {
-//     let read
-//     let write
-//     let rollback
-// }
-
-// type rescriptBuildResult = BuildSuccess | BuildFail
-
-// module type RescriptBuild = {
-//     type t = rescriptBuildResult
-//     let build: () => t
-// }
-
-// NOTE: In this version, I'd prefer to just passs in the js code string, rather than having to read the file.
-// That way it can come directly from a BuildSuccess(js_code_str) result, and elimintate the possibility of eval erroring out.
-// module type EvalCode = {
-//     let eval: () => ()
-// }
-
-// how the build_rescript_code function would look if it was to be used to satisfy the type constaints of RescriptBuild:
-// returning a promise becomes necessary here, as the return type of ChildProcess.exec is NodeJs.ChildProcess.t (but double check the source code)
-// let build_rescript_code = () => {
-//     Promise.make((resolve, _reject) => {
-//         ChildProcess.exec("npm run res:build", (error, stdout, stderr) => {
-//             if (!Js.isNullable(error)) {
-//                 // https://rescript-lang.org/docs/manual/latest/api/js/nullable#bind
-//                 Js.Nullable.bind(error, (. error_str) => {
-//                     switch error_str -> Js.Exn.message {
-//                         | Some(msg) => {
-//                             Js.log("ERROR: " ++ msg)
-//                             resolve(. BuildFail)
-//                         }
-//                         | None => resolve(. BuildFail)
-//                     }
-//                 }) -> ignore
-//             } else {
-//                 resolve(. BuildSuccess)
-//             }
-//         })
-//     })
-// }

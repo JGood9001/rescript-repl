@@ -2,6 +2,7 @@
 'use strict';
 
 var Curry = require("rescript/lib/js/curry.js");
+var Utils = require("../utils/Utils.bs.js");
 var Functor = require("../interfaces/Functor.bs.js");
 var Applicative = require("../interfaces/Applicative.bs.js");
 
@@ -26,7 +27,7 @@ var ParserFunctor = {
 
 var TFP = Functor.TestFunctor(ParserFunctor);
 
-function pure(p) {
+function pure(_p) {
   return /* Parser */{
           runParser: (function (param) {
               
@@ -61,6 +62,68 @@ var ParserApplicative = {
 
 var TAP = Applicative.TestApplicative(ParserApplicative);
 
+var empty = /* Parser */{
+  runParser: (function (param) {
+      
+    })
+};
+
+function alternative(p1, p2) {
+  return /* Parser */{
+          runParser: (function (s) {
+              var match = Curry._1(p1.runParser, s);
+              if (match !== undefined) {
+                return [
+                        match[0],
+                        match[1]
+                      ];
+              }
+              var match$1 = Curry._1(p2.runParser, s);
+              if (match$1 !== undefined) {
+                return [
+                        match$1[0],
+                        match$1[1]
+                      ];
+              }
+              
+            })
+        };
+}
+
+function some(p) {
+  var run = function (_s) {
+    while(true) {
+      var s = _s;
+      if (s.length === 0) {
+        return ;
+      }
+      var x = Curry._1(p.runParser, s);
+      if (x !== undefined) {
+        return x;
+      }
+      var match = Utils.splitAt(s, 1);
+      _s = match[1];
+      continue ;
+    };
+  };
+  return /* Parser */{
+          runParser: run
+        };
+}
+
+var ParserAlternative = {
+  fmap: fmap,
+  pure: pure,
+  apply: apply,
+  empty: empty,
+  alternative: alternative,
+  some: some
+};
+
+function runParser(p, s) {
+  return Curry._1(p.runParser, s);
+}
+
 function parseReplCommand(p, s) {
   return Curry._1(p.runParser, s);
 }
@@ -69,5 +132,7 @@ exports.ParserFunctor = ParserFunctor;
 exports.TFP = TFP;
 exports.ParserApplicative = ParserApplicative;
 exports.TAP = TAP;
+exports.ParserAlternative = ParserAlternative;
+exports.runParser = runParser;
 exports.parseReplCommand = parseReplCommand;
 /* TFP Not a pure module */

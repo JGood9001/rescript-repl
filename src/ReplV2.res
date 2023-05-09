@@ -61,7 +61,7 @@ module DomainLogicAlg = {
         REPLLogic.start_repl(make, prompt, close)
 
     let handleUserInput = state => (s: string) =>
-        REPLLogic.parseAndHandleCommands(state, s)
+        REPLLogic.parseAndHandleCommands(state, s, module(REPLLogic.FileOperations), module(REPLLogic.RescriptBuild), module(REPLLogic.EvalJavaScriptCode))
 
     let cleanup = () => {
         // https://nodejs.org/api/fs.html#fsaccesssyncpath-mode

@@ -57,7 +57,12 @@ function start_repl(prompt, close) {
   return REPLLogic.start_repl(make$1, prompt, close);
 }
 
-var handleUserInput = REPLLogic.parseAndHandleCommands;
+function handleUserInput(state, s) {
+  return REPLLogic.parseAndHandleCommands(state, s, {
+              read: REPLLogic.FileOperations.read,
+              write: REPLLogic.FileOperations.write
+            }, REPLLogic.RescriptBuild, REPLLogic.EvalJavaScriptCode);
+}
 
 function cleanup(param) {
   try {

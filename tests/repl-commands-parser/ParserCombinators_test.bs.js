@@ -7,7 +7,7 @@ var TestUtils = require("./test-utils/TestUtils.bs.js");
 var ParserCombinators = require("../../src/repl-commands-parser/ParserCombinators.bs.js");
 
 Test.test("Successfully parses appropriate input for the ':load' command", (function (param) {
-        var result = Parser.parseReplCommand(ParserCombinators.loadCommandP, ":load some_filename.res");
+        var result = Parser.runParser(ParserCombinators.loadCommandP, ":load some_filename.res");
         TestUtils.equals(undefined, [
               "",
               {
@@ -18,12 +18,12 @@ Test.test("Successfully parses appropriate input for the ':load' command", (func
       }));
 
 Test.test("Fails to parse when input for the ':load' command consists of a file with any extension other than .res", (function (param) {
-        var result = Parser.parseReplCommand(ParserCombinators.loadCommandP, ":load some_filename.txt");
+        var result = Parser.runParser(ParserCombinators.loadCommandP, ":load some_filename.txt");
         TestUtils.equals(undefined, undefined, result);
       }));
 
 Test.test("Successfully parses appropriate input for the ':{' (start multiline mode) command", (function (param) {
-        var result = Parser.parseReplCommand(ParserCombinators.startMultiLineCommandP, ":{");
+        var result = Parser.runParser(ParserCombinators.startMultiLineCommandP, ":{");
         TestUtils.equals(undefined, [
               "",
               /* StartMultiLineMode */0
@@ -31,12 +31,12 @@ Test.test("Successfully parses appropriate input for the ':{' (start multiline m
       }));
 
 Test.test("Fails to parse when input for the ':{' (start multiline mode) command is anything aside from ':{'", (function (param) {
-        var result = Parser.parseReplCommand(ParserCombinators.startMultiLineCommandP, ":{z");
+        var result = Parser.runParser(ParserCombinators.startMultiLineCommandP, ":{z");
         TestUtils.equals(undefined, undefined, result);
       }));
 
 Test.test("Successfully parses appropriate input for the '}:' (end multiline mode) command", (function (param) {
-        var result = Parser.parseReplCommand(ParserCombinators.endMultiLineCommandP, "}:");
+        var result = Parser.runParser(ParserCombinators.endMultiLineCommandP, "}:");
         TestUtils.equals(undefined, [
               "",
               /* EndMultiLineMode */1
@@ -44,8 +44,50 @@ Test.test("Successfully parses appropriate input for the '}:' (end multiline mod
       }));
 
 Test.test("Fails to parse when input for the '}:' (end multiline mode) command is anything aside from '}:'", (function (param) {
-        var result = Parser.parseReplCommand(ParserCombinators.endMultiLineCommandP, "}:a");
+        var result = Parser.runParser(ParserCombinators.endMultiLineCommandP, "}:a");
         TestUtils.equals(undefined, undefined, result);
+      }));
+
+Test.test("rescriptCodeStartsWithJsLogP Successfully parses when the string starts with Js.log", (function (param) {
+        var result = Parser.runParser(ParserCombinators.rescriptCodeStartsWithJsLogP, "Js.log");
+        TestUtils.equals(undefined, [
+              "",
+              "Js.log"
+            ], result);
+      }));
+
+Test.test("rescriptCodeStartsWithJsLogP Fails to parse when Js.log is preceded by any arbitrary series of characters", (function (param) {
+        var result = Parser.runParser(ParserCombinators.rescriptCodeStartsWithJsLogP, "dsads Js.log");
+        TestUtils.equals(undefined, undefined, result);
+      }));
+
+Test.test("rescriptCodeEndsWithJsLogP Successfully parses when the string ends ONLY with ->Js.log", (function (param) {
+        var result = Parser.runParser(ParserCombinators.rescriptCodeEndsWithJsLogP, "->Js.log");
+        TestUtils.equals(undefined, [
+              "",
+              "->Js.log"
+            ], result);
+      }));
+
+Test.test("rescriptCodeEndsWithJsLogP Fails to parse when ->Js.log is followed by anything other than an empty string", (function (param) {
+        var result = Parser.runParser(ParserCombinators.rescriptCodeEndsWithJsLogP, "x->Js.log and more");
+        TestUtils.equals(undefined, undefined, result);
+      }));
+
+Test.test("rescriptCodeStartsOrEndsWithJsLogP Successfully parses when the string starts with Js.log", (function (param) {
+        var result = Parser.runParser(ParserCombinators.rescriptCodeStartsOrEndsWithJsLogP, "Js.log");
+        TestUtils.equals(undefined, [
+              "",
+              "Js.log"
+            ], result);
+      }));
+
+Test.test("rescriptCodeStartsOrEndsWithJsLogP Successfully parses when the string ends ONLY with ->Js.log", (function (param) {
+        var result = Parser.runParser(ParserCombinators.rescriptCodeStartsOrEndsWithJsLogP, "x->Js.log");
+        TestUtils.equals(undefined, [
+              "",
+              "->Js.log"
+            ], result);
       }));
 
 /*  Not a pure module */

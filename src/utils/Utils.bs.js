@@ -2,6 +2,7 @@
 'use strict';
 
 var Curry = require("rescript/lib/js/curry.js");
+var Js_string = require("rescript/lib/js/js_string.js");
 
 function id(x) {
   return x;
@@ -15,7 +16,17 @@ function compose(f, g, x) {
   return Curry._1(f, Curry._1(g, x));
 }
 
+function splitAt(s, idx) {
+  var x = Js_string.slice(0, idx, s);
+  var y = Js_string.slice(idx, s.length, s);
+  return [
+          x,
+          y
+        ];
+}
+
 exports.id = id;
 exports.pipe = pipe;
 exports.compose = compose;
+exports.splitAt = splitAt;
 /* No side effect */
