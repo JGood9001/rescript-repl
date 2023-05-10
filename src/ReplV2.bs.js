@@ -45,11 +45,10 @@ var CommandLineIOAlg = {
 
 function make$1(param) {
   return {
-          multiline_mode: {
+          multilineMode: {
             active: false,
-            rescipe_code_input: undefined
-          },
-          prev_file_contents_state: undefined
+            rescriptCodeInput: undefined
+          }
         };
 }
 
@@ -68,6 +67,7 @@ function cleanup(param) {
   try {
     Fs.unlinkSync("./src/RescriptRepl.res");
     Fs.unlinkSync("./src/RescriptRepl.bs.js");
+    Fs.unlinkSync("./src/evalJsCode.js");
     return ;
   }
   catch (exn){
@@ -91,6 +91,12 @@ function run_repl(param) {
             });
 }
 
+var x = 100;
+
+var y = 200;
+
+exports.x = x;
+exports.y = y;
 exports.CommandLineIOAlg = CommandLineIOAlg;
 exports.DomainLogicAlg = DomainLogicAlg;
 exports.run_repl = run_repl;

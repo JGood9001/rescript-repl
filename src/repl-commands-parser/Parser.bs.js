@@ -4,6 +4,7 @@
 var Curry = require("rescript/lib/js/curry.js");
 var Utils = require("../utils/Utils.bs.js");
 var Functor = require("../interfaces/Functor.bs.js");
+var Belt_Array = require("rescript/lib/js/belt_Array.js");
 var Applicative = require("../interfaces/Applicative.bs.js");
 
 function fmap(f, p) {
@@ -111,13 +112,47 @@ function some(p) {
         };
 }
 
+function many(p) {
+  var partial_arg = [];
+  return /* Parser */{
+          runParser: (function (param) {
+              var _xs = partial_arg;
+              var _last_seen = "";
+              var _s = param;
+              while(true) {
+                var s = _s;
+                var last_seen = _last_seen;
+                var xs = _xs;
+                if (s.length === 0) {
+                  return [
+                          last_seen,
+                          xs
+                        ];
+                }
+                var match = Curry._1(p.runParser, s);
+                if (match !== undefined) {
+                  var remainingStr = match[0];
+                  _s = remainingStr;
+                  _last_seen = remainingStr;
+                  _xs = Belt_Array.concat(xs, [match[1]]);
+                  continue ;
+                }
+                var match$1 = Utils.splitAt(s, 1);
+                _s = match$1[1];
+                continue ;
+              };
+            })
+        };
+}
+
 var ParserAlternative = {
   fmap: fmap,
   pure: pure,
   apply: apply,
   empty: empty,
   alternative: alternative,
-  some: some
+  some: some,
+  many: many
 };
 
 function runParser(p, s) {
