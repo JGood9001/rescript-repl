@@ -12,7 +12,7 @@ Test.test("Successfully parses appropriate input for the ':load' command", (func
               "",
               {
                 TAG: /* LoadModule */1,
-                _0: "some_filename.res"
+                _0: "some_filename"
               }
             ], result);
       }));
@@ -88,6 +88,71 @@ Test.test("rescriptCodeStartsOrEndsWithJsLogP Successfully parses when the strin
               "",
               "->Js.log"
             ], result);
+      }));
+
+Test.test("openModuleLineP Successfully parses the a module import from a string of rescript code", (function (param) {
+        var restCodeStr = "\r\n        let x = 100\r\n        Js.log(x + 100)\r\n    ";
+        var codeStr = "open Utils\n" + restCodeStr;
+        var result = Parser.runParser(ParserCombinators.openModuleLineP, codeStr);
+        var expected = [
+          "\n" + restCodeStr,
+          "open Utils\n"
+        ];
+        TestUtils.equals(undefined, expected, result);
+      }));
+
+Test.test("openModuleLinesP Successfully parses a section of module imports from a string of rescript code", (function (param) {
+        var moduleSectionStr = "open Utils\nopen ParserCombinators";
+        var restCodeStr = "\r\n        let x = 100\r\n        Js.log(x + 100)\r\n    ";
+        var codeStr = moduleSectionStr + "\n" + restCodeStr;
+        var result = Parser.runParser(ParserCombinators.openModuleLinesP, codeStr);
+        var expected = [
+          "\n" + restCodeStr,
+          [
+            "open Utils\n",
+            "open ParserCombinators\n"
+          ]
+        ];
+        TestUtils.equals(undefined, expected, result);
+      }));
+
+Test.test("Parser.ParserAlternative.many Successfully parsesg many a's", (function (param) {
+        var result = Parser.runParser(Parser.ParserAlternative.many(ParserCombinators.str("a")), "aaab");
+        var expected = [
+          "b",
+          [
+            "a",
+            "a",
+            "a"
+          ]
+        ];
+        TestUtils.equals(undefined, expected, result);
+      }));
+
+Test.test("Parser.ParserAlternative.many Successfully parses many a's", (function (param) {
+        var result = Parser.runParser(Parser.ParserAlternative.many(ParserCombinators.str("ab")), "ababzr");
+        var expected = [
+          "zr",
+          [
+            "ab",
+            "ab"
+          ]
+        ];
+        TestUtils.equals(undefined, expected, result);
+      }));
+
+Test.test("openModuleSectionP Successfully parses the module import section from the remaining code in a string of rescript code", (function (param) {
+        var moduleSectionStr = "// Module Imports\nopen Utils\nopen ParserCombinators";
+        var restCodeStr = "\r\n        let x = 100\r\n        Js.log(x + 100)\r\n    ";
+        var codeStr = moduleSectionStr + "\n" + restCodeStr;
+        var result = Parser.runParser(ParserCombinators.openModuleSectionP, codeStr);
+        var expected = [
+          "\n" + restCodeStr,
+          /* OpenModuleSection */{
+            _0: moduleSectionStr + "\n"
+          }
+        ];
+        TestUtils.equals(undefined, expected, result);
       }));
 
 /*  Not a pure module */

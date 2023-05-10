@@ -27,4 +27,7 @@ module type Alternative = {
     let empty: t<'a>
     let alternative: t<'a> => t<'a> => t<'a>
     let some: t<'a> => t<'a>
+
+    // let some: t<'a> => t<array<'a>> // some is really supposed to be of this type as well
+    let many: t<string> => t<array<string>>
 }

@@ -4,7 +4,7 @@ open ParserCombinators
 
 test("Successfully parses appropriate input for the ':load' command", () => {
     let result = Parser.runParser(loadCommandP, ":load some_filename.res")
-    let expected = Some(("", REPLCommands.LoadModule("some_filename.res")))
+    let expected = Some(("", REPLCommands.LoadModule("some_filename")))
     equals(expected, result)
 })
 
@@ -75,6 +75,69 @@ test("rescriptCodeStartsOrEndsWithJsLogP Successfully parses when the string end
     equals(expected, result)
 })
 
+test("openModuleLineP Successfully parses the a module import from a string of rescript code", () => {
+    let moduleSectionStr = "open Utils"
+
+    let restCodeStr = `
+        let x = 100
+        Js.log(x + 100)
+    `
+
+    let codeStr = moduleSectionStr ++ "\n" ++ restCodeStr
+
+    let result = Parser.runParser(openModuleLineP, codeStr)
+    let expected = Some(("\n" ++ restCodeStr, "open Utils\n"))
+    equals(expected, result)
+})
+
+test("openModuleLinesP Successfully parses a section of module imports from a string of rescript code", () => {
+    let moduleSectionStr =
+        "open Utils\n" ++
+        "open ParserCombinators"
+
+    let restCodeStr = `
+        let x = 100
+        Js.log(x + 100)
+    `
+
+    let codeStr = moduleSectionStr ++ "\n" ++ restCodeStr
+
+    let result = Parser.runParser(openModuleLinesP, codeStr)
+    // I don't know why the newline is required for the above, yet not for this one, but if it doesn't affect
+    // the desired end result, then I'm cool with it.
+    let expected = Some(("\n" ++ restCodeStr, ["open Utils\n", "open ParserCombinators\n"]))
+    equals(expected, result)
+})
+
+test("Parser.ParserAlternative.many Successfully parsesg many a's", () => {
+    let result = Parser.runParser(Parser.ParserAlternative.many(ParserCombinators.str("a")), "aaab")
+    let expected = Some(("b", ["a", "a", "a"]))
+    equals(expected, result)
+})
+
+test("Parser.ParserAlternative.many Successfully parses many a's", () => {
+    let result = Parser.runParser(Parser.ParserAlternative.many(ParserCombinators.str("ab")), "ababzr")
+    let expected = Some(("zr", ["ab", "ab"]))
+    equals(expected, result)
+})
+
+test("openModuleSectionP Successfully parses the module import section from the remaining code in a string of rescript code", () => {
+    let moduleSectionStr =
+        "// Module Imports\n" ++
+        "open Utils\n" ++
+        "open ParserCombinators"
+
+    let restCodeStr = `
+        let x = 100
+        Js.log(x + 100)
+    `
+
+    let codeStr = moduleSectionStr ++ "\n" ++ restCodeStr
+
+    let result = Parser.runParser(openModuleSectionP, codeStr)
+    let expected = Some(("\n" ++ restCodeStr, OpenModuleSection(moduleSectionStr ++ "\n")))
+    equals(expected, result)
+})
 
 // TODO: write tests for the primitive combinators as well.
 // let Parser(hi_parser) = str("hi")

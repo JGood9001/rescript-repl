@@ -3,7 +3,7 @@ open TestUtils
 
 test("Successfully parses the ':load' command", () => {
     let result = REPLLogic.parseReplCommand(":load some_filename.res")
-    let expected = REPLCommands.LoadModule("some_filename.res")
+    let expected = REPLCommands.LoadModule("some_filename")
     equals(expected, result)
 })
 

@@ -12,6 +12,9 @@ open NewRepl
 // CommandLineIO instance
 // ******************************************
 
+let x = 100
+let y = 200
+
 module CommandLineIOAlg = {
   type t = Readline.Interface.t
 
@@ -20,12 +23,19 @@ module CommandLineIOAlg = {
         Readline.interfaceOptions(~input=Process.process->Process.stdin, ~output=Process.process->Process.stdout, ()),
     )->CommandLineIO
 
+  // TODO:
+  // This will need to be implemented to support pasting
+  // https://stackoverflow.com/questions/66755705/detect-pasted-input-with-readline-nodejs
   let prompt = (CommandLineIO(rl), query, cb) =>
-    Promise.make((resolve, _reject) => rl->Readline.Interface.question(query, x => resolve(. x)))
-    ->Promise.then(user_input => cb(user_input))
+    Promise.make((resolve, _reject) =>
+        rl
+        ->Readline.Interface.question(query, x => resolve(. x)))
+        ->Promise.then(user_input => cb(user_input))
 
   let on = (CommandLineIO(rl), event, cb) =>
-    rl->Readline.Interface.on(Event.fromString(event), cb)->CommandLineIO
+    rl
+    ->Readline.Interface.on(Event.fromString(event), cb)
+    ->CommandLineIO
 
   let close = (CommandLineIO(rl)) => rl->Readline.Interface.close
 }
@@ -47,14 +57,13 @@ module CommandLineIOAlg = {
 // s => RescriptCode(s)
 
 module DomainLogicAlg = {
-    type t = DomainLogicAlg.domain_logic_state
+    type t = DomainLogicAlg.domainLogicState
 
     let make = () => {
-        multiline_mode: {
+        multilineMode: {
             active: false,
-            rescipe_code_input: None,
-        },
-        prev_file_contents_state: None,
+            rescriptCodeInput: None,
+        }
     }
 
     let start_repl = (prompt, close) =>
@@ -71,6 +80,7 @@ module DomainLogicAlg = {
         try {
             unlinkSync("./src/RescriptRepl.res")
             unlinkSync("./src/RescriptRepl.bs.js")
+            unlinkSync("./src/evalJsCode.js")
             ()
         } catch {
             | _ => ()

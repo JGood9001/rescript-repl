@@ -5,6 +5,7 @@ var Utils = require("../utils/Utils.bs.js");
 var Parser = require("./Parser.bs.js");
 var $$String = require("rescript/lib/js/string.js");
 var Js_string = require("rescript/lib/js/js_string.js");
+var Belt_Array = require("rescript/lib/js/belt_Array.js");
 
 function matchStr(stringToMatch, inputStr) {
   return Js_string.slice(0, stringToMatch.length, inputStr) === stringToMatch;
@@ -132,7 +133,7 @@ var rescriptFileP = Parser.ParserApplicative.apply(Parser.ParserApplicative.fmap
 var loadCommandP = Parser.ParserApplicative.apply(Parser.ParserApplicative.apply(Parser.ParserApplicative.fmap((function (param, param$1, param$2) {
                 return {
                         TAG: /* LoadModule */1,
-                        _0: param$2[0] + param$2[1]
+                        _0: param$2[0]
                       };
               }), str(":load")), space), rescriptFileP);
 
@@ -164,6 +165,20 @@ var javascriptFileP = Parser.ParserApplicative.apply(Parser.ParserApplicative.fm
 
 var rescriptJavascriptFileP = Parser.ParserAlternative.alternative(rescriptFileP$1, javascriptFileP);
 
+var openModuleLineP = Parser.ParserApplicative.apply(Parser.ParserApplicative.apply(Parser.ParserApplicative.fmap((function (openStr, _space, moduleName) {
+                return openStr + " " + moduleName + "\n";
+              }), str("open")), space), takeUntil("\n"));
+
+var openModuleLinesP = Parser.ParserAlternative.many(openModuleLineP);
+
+var openModuleSectionP = Parser.ParserApplicative.apply(Parser.ParserApplicative.fmap((function (x, openModuleLines) {
+            return /* OpenModuleSection */{
+                    _0: x + "\n" + Belt_Array.reduce(openModuleLines, "", (function (a, b) {
+                            return a + b;
+                          }))
+                  };
+          }), str("// Module Imports")), openModuleLinesP);
+
 exports.matchStr = matchStr;
 exports.charToString = charToString;
 exports.$$char = $$char;
@@ -182,4 +197,7 @@ exports.rescriptCodeStartsOrEndsWithJsLogP = rescriptCodeStartsOrEndsWithJsLogP;
 exports.rescriptFileP = rescriptFileP$1;
 exports.javascriptFileP = javascriptFileP;
 exports.rescriptJavascriptFileP = rescriptJavascriptFileP;
+exports.openModuleLineP = openModuleLineP;
+exports.openModuleLinesP = openModuleLinesP;
+exports.openModuleSectionP = openModuleSectionP;
 /* rescriptFileP Not a pure module */

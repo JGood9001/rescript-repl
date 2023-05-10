@@ -9,7 +9,7 @@ Test.test("Successfully parses the ':load' command", (function (param) {
         var result = REPLLogic.parseReplCommand(":load some_filename.res");
         TestUtils.equals(undefined, {
               TAG: /* LoadModule */1,
-              _0: "some_filename.res"
+              _0: "some_filename"
             }, result);
       }));
 

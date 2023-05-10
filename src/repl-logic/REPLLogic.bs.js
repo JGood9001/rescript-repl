@@ -11,6 +11,7 @@ var Belt_Option = require("rescript/lib/js/belt_Option.js");
 var Child_process = require("child_process");
 var Js_null_undefined = require("rescript/lib/js/js_null_undefined.js");
 var ParserCombinators = require("../repl-commands-parser/ParserCombinators.bs.js");
+var Caml_js_exceptions = require("rescript/lib/js/caml_js_exceptions.js");
 
 function build(param) {
   return new Promise((function (resolve, _reject) {
@@ -21,7 +22,7 @@ function build(param) {
                           Js_null_undefined.bind(error, (function (error_str) {
                                   var msg = error_str.message;
                                   if (msg !== undefined) {
-                                    console.log("ERROR: " + msg);
+                                    console.log("ERROR building ReScript code: " + msg);
                                     console.log("stdout: " + stdout.toString());
                                     return resolve(/* BuildFail */1);
                                   } else {
@@ -48,6 +49,7 @@ function write(s, contents) {
 
 function read(s) {
   var s$1 = s._0;
+  var initialContents = "// Module Imports\n";
   if (isFilepath(s$1)) {
     try {
       return Fs.readFileSync(s$1, "utf8");
@@ -55,14 +57,14 @@ function read(s) {
     catch (exn){
       write(/* Filepath */{
             _0: s$1
-          }, "");
-      return "";
+          }, initialContents);
+      return initialContents;
     }
   } else {
     write(/* Filepath */{
           _0: s$1
-        }, "");
-    return "";
+        }, initialContents);
+    return initialContents;
   }
 }
 
@@ -71,16 +73,41 @@ var FileOperations = {
   read: read
 };
 
-function eval_js_code(code) {
+function eval_js_code(code, FO) {
   var code$1 = code._0;
-  try {
-    eval(code$1);
-    return ;
-  }
-  catch (exn){
-    console.log("ERROR: Failed to evalutate the following JavaScript code: \n" + code$1);
-    return ;
-  }
+  return new Promise((function (resolve, _reject) {
+                try {
+                  Curry._2(FO.write, /* Filepath */{
+                        _0: "./src/evalJsCode.js"
+                      }, "eval(\`" + code$1 + "\`)");
+                  Child_process.exec("node ./src/evalJsCode.js", (function (error, stdout, stderr) {
+                          if (error == null) {
+                            console.log(stdout);
+                            return resolve(undefined);
+                          } else {
+                            Js_null_undefined.bind(error, (function (error_str) {
+                                    var msg = error_str.message;
+                                    if (msg !== undefined) {
+                                      console.log("ERROR running JavaScript code: " + msg);
+                                      console.log("stdout: " + stdout.toString());
+                                      return resolve(undefined);
+                                    } else {
+                                      return resolve(undefined);
+                                    }
+                                  }));
+                            return ;
+                          }
+                        }));
+                  return ;
+                }
+                catch (raw_x){
+                  var x = Caml_js_exceptions.internalToOCamlException(raw_x);
+                  console.log("ERROR: Failed to evalutate the following JavaScript code: \n" + code$1);
+                  console.log("REASON: ");
+                  console.log(x);
+                  return resolve(undefined);
+                }
+              }));
 }
 
 var EvalJavaScriptCode = {
@@ -138,62 +165,130 @@ function startsOrEndsWithJsLog(s) {
   return Parser.runParser(ParserCombinators.rescriptCodeStartsOrEndsWithJsLogP, s) !== undefined;
 }
 
+function then(p, f) {
+  return p.then(function (x) {
+              return new Promise((function (resolve, _reject) {
+                            Curry._1(f, x);
+                            resolve(undefined);
+                          }));
+            });
+}
+
 function handleBuildAndEval(code_str, FO, RB, EvalJS) {
   var prevContents = Curry._1(FO.read, /* Filepath */{
-        _0: "src/RescriptREPL.res"
+        _0: "./src/RescriptREPL.res"
       });
   Curry._2(FO.write, /* Filepath */{
         _0: "./src/RescriptREPL.res"
       }, prevContents + "\n" + code_str);
-  Curry._1(RB.build, undefined).then(function (result) {
-        return new Promise((function (resolve, _reject) {
-                      if (result) {
-                        Curry._2(FO.write, /* Filepath */{
-                              _0: "./src/RescriptREPL.res"
-                            }, prevContents);
-                        return resolve(undefined);
+  return Curry._1(RB.build, undefined).then(function (result) {
+              return new Promise((function (resolve, _reject) {
+                            if (result) {
+                              Curry._2(FO.write, /* Filepath */{
+                                    _0: "./src/RescriptREPL.res"
+                                  }, prevContents);
+                              return resolve(undefined);
+                            }
+                            var jsCodeStr = Curry._1(FO.read, /* Filepath */{
+                                  _0: "./src/RescriptREPL.bs.js"
+                                });
+                            then(Curry._2(EvalJS.$$eval, /* JavaScriptCode */{
+                                      _0: jsCodeStr
+                                    }, FO), (function (param) {
+                                    if (startsOrEndsWithJsLog(code_str)) {
+                                      Curry._2(FO.write, /* Filepath */{
+                                            _0: "./src/RescriptREPL.res"
+                                          }, prevContents);
+                                    }
+                                    resolve(undefined);
+                                  }));
+                          }));
+            });
+}
+
+function handleEndMultiLineCase(state, FO, RB, EvalJS) {
+  var codeStr = state.multilineMode.rescriptCodeInput;
+  if (codeStr !== undefined) {
+    return handleBuildAndEval(codeStr, FO, RB, EvalJS).then(function (_result) {
+                return new Promise((function (resolve, _reject) {
+                              resolve({
+                                    multilineMode: {
+                                      active: false,
+                                      rescriptCodeInput: undefined
+                                    }
+                                  });
+                            }));
+              });
+  } else {
+    return Js_exn.raiseError("INVARIANT VIOLATION: The EndMultiLineMode case expects for there to be some rescriptCodeInput present.");
+  }
+}
+
+function handleRescriptCodeCase(state, nextCodeStr, FO, RB, EvalJS) {
+  return new Promise((function (resolve, _reject) {
+                if (state.multilineMode.active) {
+                  var prevCodeStr = state.multilineMode.rescriptCodeInput;
+                  if (prevCodeStr !== undefined) {
+                    var updated_state = {
+                      multilineMode: {
+                        active: true,
+                        rescriptCodeInput: prevCodeStr + "\n" + nextCodeStr
                       }
-                      var jsCodeStr = Curry._1(FO.read, /* Filepath */{
-                            _0: "./src/RescriptREPL.bs.js"
-                          });
-                      Curry._1(EvalJS.$$eval, /* JavaScriptCode */{
-                            _0: jsCodeStr
-                          });
-                      if (startsOrEndsWithJsLog(code_str)) {
-                        Curry._2(FO.write, /* Filepath */{
-                              _0: "./src/RescriptREPL.res"
-                            }, prevContents);
-                      }
-                      resolve(undefined);
-                    }));
-      });
+                    };
+                    return resolve(updated_state);
+                  }
+                  console.log("INVARIANT VIOLATION: The RescriptCode case expects for there to be some rescriptCodeInput present.");
+                  return ;
+                }
+                then(handleBuildAndEval(nextCodeStr, FO, RB, EvalJS), (function (param) {
+                        resolve(state);
+                      }));
+              }));
 }
 
 function parseAndHandleCommands(state, s, FO, RB, EvalJS) {
   return new Promise((function (resolve, _reject) {
-                var _filename = parseReplCommand(s);
-                if (typeof _filename === "number") {
-                  if (_filename === /* StartMultiLineMode */0) {
-                    console.log("StartMultiLineMode");
+                var moduleName = parseReplCommand(s);
+                if (typeof moduleName === "number") {
+                  if (moduleName === /* StartMultiLineMode */0) {
                     return resolve(/* Continue */{
-                                _0: state
+                                _0: {
+                                  multilineMode: {
+                                    active: true,
+                                    rescriptCodeInput: ""
+                                  }
+                                }
                               });
                   }
-                  console.log("EndMultiLineMode");
-                  return resolve(/* Continue */{
-                              _0: state
-                            });
+                  then(handleEndMultiLineCase(state, FO, RB, EvalJS), (function (updatedState) {
+                          resolve(/* Continue */{
+                                _0: updatedState
+                              });
+                        }));
+                  return ;
                 } else {
-                  if (_filename.TAG === /* RescriptCode */0) {
-                    handleBuildAndEval(_filename._0, FO, RB, EvalJS);
-                    return resolve(/* Continue */{
+                  if (moduleName.TAG === /* RescriptCode */0) {
+                    then(handleRescriptCodeCase(state, moduleName._0, FO, RB, EvalJS), (function (nextState) {
+                            resolve(/* Continue */{
+                                  _0: nextState
+                                });
+                          }));
+                    return ;
+                  }
+                  var codeStr = Curry._1(FO.read, /* Filepath */{
+                        _0: "./src/RescriptREPL.res"
+                      });
+                  var match = Parser.runParser(ParserCombinators.openModuleSectionP, codeStr);
+                  if (match === undefined) {
+                    return Js_exn.raiseError("ERROR: failed to parse for the module import section of the rescript file");
+                  }
+                  var nextCodeStr = match[1]._0 + ("open " + moduleName._0 + "") + match[0];
+                  then(handleBuildAndEval(nextCodeStr, FO, RB, EvalJS), (function (param) {
+                          resolve(/* Continue */{
                                 _0: state
                               });
-                  }
-                  console.log("LoadModule");
-                  return resolve(/* Continue */{
-                              _0: state
-                            });
+                        }));
+                  return ;
                 }
               }));
 }
@@ -208,6 +303,9 @@ exports.handleContOrClose = handleContOrClose;
 exports.start_repl = start_repl;
 exports.parseReplCommand = parseReplCommand;
 exports.startsOrEndsWithJsLog = startsOrEndsWithJsLog;
+exports.then = then;
 exports.handleBuildAndEval = handleBuildAndEval;
+exports.handleEndMultiLineCase = handleEndMultiLineCase;
+exports.handleRescriptCodeCase = handleRescriptCodeCase;
 exports.parseAndHandleCommands = parseAndHandleCommands;
 /* fs Not a pure module */

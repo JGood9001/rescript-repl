@@ -8,34 +8,6 @@ open DomainLogicAlg
 @module("fs") external writeFileSync: string => string => () = "writeFileSync"
 external eval: string => () = "eval"
 
-// https://github.com/TheSpyder/rescript-nodejs/blob/main/src/ChildProcess.res#L81
-// external exec: (string, (Js.nullable<Js.Exn.t>, Buffer.t, Buffer.t) => unit) => t = "exec"
-// let build_rescript_code = (prev_contents, f) => {
-//     // NOTE: I thought there was a way to suppress warnings, but that doesn't seem to be the case.
-//     // https://rescript-lang.org/docs/manual/latest/build-overview
-//     ChildProcess.exec("npm run res:build", (error, stdout, stderr) => {
-//         if (!Js.isNullable(error)) {
-//             // https://rescript-lang.org/docs/manual/latest/api/js/nullable#bind
-//             Js.Nullable.bind(error, (. error_str) => {
-//                 switch error_str -> Js.Exn.message {
-//                     | Some(msg) => {
-//                         Js.log("ERROR: " ++ msg)
-//                         // TODO: Will need to see if I can improve highlighting the error later, but for now
-//                         // this at least outputs whether the build succeeded/failed and will highlight the error
-//                         // that caused it within the RescriptRepl.res file.
-//                         Js.log("stdout: " ++ Buffer.toString(stdout))
-
-//                         // Rollback to last successful file build
-//                         writeFileSync("./src/RescriptRepl.res", prev_contents) -> ignore
-//                     }
-//                     | None => ()
-//                 }
-//             }) -> ignore
-//         } else {
-//             f()
-//         }
-//     })
-// }
 
 type rescriptBuildResult = BuildSuccess | BuildFail
 
@@ -44,7 +16,9 @@ module type RescriptBuild = {
     let build: () => Promise.t<rescriptBuildResult>
 }
 
-// returning a promise becomes necessary here, as the return type of ChildProcess.exec is NodeJs.ChildProcess.t (but double check the source code)
+// returning a promise becomes necessary here, as the return type of ChildProcess.exec is NodeJs.ChildProcess.t
+// https://github.com/TheSpyder/rescript-nodejs/blob/main/src/ChildProcess.res#L81
+// external exec: (string, (Js.nullable<Js.Exn.t>, Buffer.t, Buffer.t) => unit) => t = "exec"
 let build = () => {
     Promise.make((resolve, _reject) => {
         ChildProcess.exec("npm run res:build", (error, stdout, stderr) => {
@@ -53,7 +27,7 @@ let build = () => {
                 Js.Nullable.bind(error, (. error_str) => {
                     switch error_str -> Js.Exn.message {
                         | Some(msg) => {
-                            Js.log("ERROR: " ++ msg)
+                            Js.log("ERROR building ReScript code: " ++ msg)
                             Js.log("stdout: " ++ Buffer.toString(stdout))
                             resolve(. BuildFail)
                         }
@@ -97,18 +71,19 @@ module FileOperations = {
     let read = (Filepath(s)) => {
         // So long as the string passed in refers to a filepath, then the only case
         // which throws an exception is where the file doesn't exist.
+        let initialContents = "// Module Imports\n"
         if isFilepath(s) {
             try {
                 readFileSync(s, "utf8")
             } catch {
                 | _ => {
-                    write(Filepath(s), "")
-                    ""
+                    write(Filepath(s), initialContents)
+                    initialContents
                 }
             }
         } else {
-            write(Filepath(s), "")
-            ""
+            write(Filepath(s), initialContents)
+            initialContents
         }
     }
 }
@@ -116,15 +91,45 @@ module FileOperations = {
 type javaScriptCode = JavaScriptCode(string)
 
 module type EvalJavaScriptCode = {
-    let eval: javaScriptCode => ()
+    let eval: javaScriptCode => module (FileOperations) => Promise.t<()>
 }
 
-let eval_js_code = (JavaScriptCode(code)) => {
-    try {
-        eval(code)
-    } catch {
-        | _ => Js.log("ERROR: Failed to evalutate the following JavaScript code: \n" ++ code)
-    }
+// NOTE:
+// This version of eval_js_code instead of the above is necessary, because invoking eval from this file results in any
+// file lookup via require inside of RescriptREPL.bs.js being done relative to this file's path (REPLLogic.res) context, instead of
+// in the context of ./src which is required in order to be able to load modules within the scope of the user's current project.
+let eval_js_code = (JavaScriptCode(code), module (FO: FileOperations)) => {
+    Promise.make((resolve, _reject) => {
+        try {
+            FO.write(Filepath("./src/evalJsCode.js"), `eval(\`${code}\`)`)
+            
+            ChildProcess.exec("node ./src/evalJsCode.js", (error, stdout, stderr) => {
+                if (!Js.isNullable(error)) {
+                    // https://rescript-lang.org/docs/manual/latest/api/js/nullable#bind
+                    Js.Nullable.bind(error, (. error_str) => {
+                        switch error_str -> Js.Exn.message {
+                            | Some(msg) => {
+                                Js.log("ERROR running JavaScript code: " ++ msg)
+                                Js.log("stdout: " ++ Buffer.toString(stdout))
+                                resolve(. ())
+                            }
+                            | None => resolve(. ())
+                        }
+                    }) -> ignore
+                } else {
+                    Js.log(stdout)
+                    resolve(. ())
+                }
+            })->ignore
+        } catch {
+            | x => {
+                Js.log("ERROR: Failed to evalutate the following JavaScript code: \n" ++ code)
+                Js.log("REASON: ")
+                Js.log(x)
+                resolve(. ())
+            }
+        }
+    })
 }
 
 module EvalJavaScriptCode = {
@@ -189,8 +194,19 @@ let startsOrEndsWithJsLog = (s: string): bool => {
     }
 }
 
+// This pattern just kept popping up in this file
+let then = (p: Promise.t<'a>, f: 'a => ()): Promise.t<()> => {
+    p
+    ->Promise.then(x => {
+        Promise.make((resolve, _reject) => {
+            f(x)
+            resolve(. ())
+        })
+    })
+}
+
 let handleBuildAndEval = (code_str, module(FO : FileOperations), module(RB : RescriptBuild), module(EvalJS : EvalJavaScriptCode)) => {
-    let prevContents = FO.read(Filepath("src/RescriptREPL.res"))
+    let prevContents = FO.read(Filepath("./src/RescriptREPL.res"))
     FO.write(Filepath("./src/RescriptREPL.res"), prevContents ++ "\n" ++ code_str)
     RB.build()
     -> Promise.then(result => {
@@ -203,43 +219,87 @@ let handleBuildAndEval = (code_str, module(FO : FileOperations), module(RB : Res
                 }
                 | BuildSuccess => {
                     let jsCodeStr = FO.read(Filepath("./src/RescriptREPL.bs.js"))
-                    EvalJS.eval(JavaScriptCode(jsCodeStr))
-                    if startsOrEndsWithJsLog(code_str) {
-                        FO.write(Filepath("./src/RescriptREPL.res"), prevContents)
-                    }
-                    resolve(. ())
+                    // Changed EvalJS.eval to return a promise, as if you don't wait for the stdout to be printed, then this will prevent the prompt icon
+                    // from being displayed.
+                    EvalJS.eval(JavaScriptCode(jsCodeStr), module(FO))
+                    ->then(_ => {
+                        if startsOrEndsWithJsLog(code_str) {
+                            FO.write(Filepath("./src/RescriptREPL.res"), prevContents)
+                        }
+                        resolve(. ())
+                    })->ignore
                 }
             }
         })
-    })->ignore
+    }) // ->ignore
+}
+
+let handleEndMultiLineCase = (state: domainLogicState, module (FO: FileOperations), module (RB: RescriptBuild), module (EvalJS: EvalJavaScriptCode)): Promise.t<domainLogicState> => {
+    switch state.multilineMode.rescriptCodeInput {
+        | Some(codeStr) => {
+            handleBuildAndEval(codeStr, module(FO), module(RB), module(EvalJS))
+            -> Promise.then(_result => {
+                let updatedState = { multilineMode: { active: false, rescriptCodeInput: None }}
+                Promise.make((resolve, _reject) => resolve(. updatedState))
+            })
+        }
+        | None => Js.Exn.raiseError("INVARIANT VIOLATION: The EndMultiLineMode case expects for there to be some rescriptCodeInput present.")
+    }
+}
+
+let handleRescriptCodeCase = (state: domainLogicState, nextCodeStr: string, module(FO : FileOperations), module(RB : RescriptBuild), module(EvalJS : EvalJavaScriptCode)): Promise.t<domainLogicState> => {
+    Promise.make((resolve, _reject) => {
+        if state.multilineMode.active {
+            switch state.multilineMode.rescriptCodeInput {
+                | Some(prevCodeStr) => {
+                    let updated_state = { multilineMode: { active: true, rescriptCodeInput: Some(prevCodeStr ++ "\n" ++ nextCodeStr) }}
+                    resolve(. updated_state)
+                }
+                | None => Js.log("INVARIANT VIOLATION: The RescriptCode case expects for there to be some rescriptCodeInput present.")
+            }
+        } else {
+            // Without the Promise.then, when a user is entering multiple lines of code in quick succession (+ where some lines contain errors)
+            // will cause the rollback to restore potentially invalid code.
+            handleBuildAndEval(nextCodeStr, module(FO), module(RB), module(EvalJS))
+            ->then(_ => resolve(. state))->ignore
+        }
+    })
 }
 
 // I also had a :reset command in the first version which would wipe the file clean...
-let parseAndHandleCommands = (state: domain_logic_state, s: string, module(FO : FileOperations), module(RB : RescriptBuild), module(EvalJS : EvalJavaScriptCode)) => {
+let parseAndHandleCommands = (state: domainLogicState, s: string, module(FO : FileOperations), module(RB : RescriptBuild), module(EvalJS : EvalJavaScriptCode)) => {
     Promise.make((resolve, _reject) => {
         switch parseReplCommand(s) {
             | StartMultiLineMode => {
-                // TODO: Update state to reflect entering multiline mode
-                // will need to modify some state to indicate that future lines should be appended to a string stored on 
-                Js.log("StartMultiLineMode")
-                resolve(. DomainLogicAlg.Continue(state))
+                let updated_state = { multilineMode: { active: true, rescriptCodeInput: Some("") }}
+                resolve(. DomainLogicAlg.Continue(updated_state))
             }
             | EndMultiLineMode => {
-                // TODO: Update state to reflect exiting multiline mode and
-                // persist and build entered rescript code
-                // will need to retrieve appended string from state, append it to file and run the res:build/rollback procedure
-                Js.log("EndMultiLineMode")
-                resolve(. DomainLogicAlg.Continue(state))
+                handleEndMultiLineCase(state, module(FO), module(RB), module(EvalJS))
+                ->then(updatedState => resolve(. DomainLogicAlg.Continue(updatedState)))->ignore
             }
-            | LoadModule(_filename) => {
-                // TODO: Load rescript file and all of the specified dependencies in their necessary order.
-                Js.log("LoadModule")
-                resolve(. DomainLogicAlg.Continue(state))
+            // TODO/LLO
+            // This works, but now the :load command should be updated to
+            // :load Utils
+            // rather than
+            // :load Utils.res
+            | LoadModule(moduleName) => {
+                let codeStr = FO.read(Filepath("./src/RescriptREPL.res"))
+                switch Parser.runParser(openModuleSectionP, codeStr) {
+                    | Some((remainingCodeStr, OpenModuleSection(openModuleSectionStr))) => {
+                        let nextCodeStr = openModuleSectionStr ++ `open ${moduleName}` ++ remainingCodeStr
+      
+                        handleBuildAndEval(nextCodeStr, module(FO), module(RB), module(EvalJS))
+                        ->then(_ => resolve(. DomainLogicAlg.Continue(state)))->ignore
+                    }
+                    | None => Js.Exn.raiseError("ERROR: failed to parse for the module import section of the rescript file")
+                }
             }
-            | RescriptCode(code_str) => {
-                handleBuildAndEval(code_str, module(FO), module(RB), module(EvalJS))
-                resolve(. DomainLogicAlg.Continue(state))
+            | RescriptCode(nextCodeStr) => {
+                handleRescriptCodeCase(state, nextCodeStr, module(FO), module(RB), module(EvalJS))
+                ->then(nextState => resolve(. DomainLogicAlg.Continue(nextState)))->ignore
             }
+            // | Reset => FO.write("./src/RescriptREPL.res", "")
         }
     })
 }

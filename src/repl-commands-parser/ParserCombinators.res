@@ -69,12 +69,10 @@ let rescriptFileP: parser<(string, string)> =
     ->ParserApplicative.apply(str(".res"))
 
 let loadCommandP: parser<replCommand> = {
-    ((_, _, (filename, ext)) => LoadModule(filename ++ ext))
+    ((_, _, (moduleName, _)) => LoadModule(moduleName))
     ->ParserApplicative.fmap(str(":load"))
     ->ParserApplicative.apply(space)
     ->ParserApplicative.apply(rescriptFileP)
-    // ->ParserApplicative.apply(takeUntil("."))
-    // ->ParserApplicative.apply(str(".res"))
 }
 
 let startMultiLineCommandP: parser<replCommand> =
@@ -94,7 +92,7 @@ let rescriptCodeEndsWithJsLogP: parser<string> =
     ((x, _) => x)->ParserApplicative.fmap(ParserAlternative.some(str("->Js.log")))->ParserApplicative.apply(empty)
 
 let rescriptCodeStartsOrEndsWithJsLogP: parser<string> =
-    ParserAlternative.alternative(rescriptCodeStartsWithJsLogP, rescriptCodeEndsWithJsLogP) // compose(string("->Js.log"), empty))
+    ParserAlternative.alternative(rescriptCodeStartsWithJsLogP, rescriptCodeEndsWithJsLogP)
 
 let rescriptFileP: parser<string> =
     ((x, _) => x)->ParserApplicative.fmap(ParserAlternative.some(str(".res")))->ParserApplicative.apply(empty)
@@ -104,3 +102,22 @@ let javascriptFileP: parser<string> =
 
 let rescriptJavascriptFileP =
     ParserAlternative.alternative(rescriptFileP, javascriptFileP)
+
+let openModuleLineP =
+    ((openStr, _space, moduleName) => openStr ++ " " ++ moduleName ++ "\n")
+    ->ParserApplicative.fmap(str("open")) 
+    ->ParserApplicative.apply(space)
+    ->ParserApplicative.apply(takeUntil("\n"))
+
+// Going to need to implement Alternative.many, as you'll want to retrieve all lines that start with open
+let openModuleLinesP =
+    ParserAlternative.many(openModuleLineP)
+
+type openModuleSection = OpenModuleSection(string)
+
+let openModuleSectionP: parser<openModuleSection> =
+    ((x, openModuleLines) => {
+        OpenModuleSection(x ++ "\n" ++ Belt.Array.reduce(openModuleLines, "", (a, b) => a ++ b))
+    })
+    ->ParserApplicative.fmap(str("// Module Imports"))
+    ->ParserApplicative.apply(openModuleLinesP)
