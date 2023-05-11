@@ -17,13 +17,13 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@ryyppy/rescript-promise": "^2.1.0",
+    "@ryyppy/rescript-promise": "2.1.0",
     "rescript": "10.1",
-    "rescript-js": "^1.0.0-beta.2",
-    "rescript-nodejs": "^14.3.1"
+    "rescript-js": "1.0.0-beta.2",
+    "rescript-nodejs": "14.3.1"
   },
   "devDependencies": {
-    "rescript-fast-check": "^1.1.1",
-    "rescript-test": "^4.0.0"
+    "rescript-fast-check": "1.1.1",
+    "rescript-test": "4.0.0"
   }
 }
