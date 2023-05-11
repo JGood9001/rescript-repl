@@ -92,23 +92,39 @@ function alternative(p1, p2) {
 }
 
 function some(p) {
-  var run = function (_s) {
-    while(true) {
-      var s = _s;
-      if (s.length === 0) {
-        return ;
-      }
-      var x = Curry._1(p.runParser, s);
-      if (x !== undefined) {
-        return x;
-      }
-      var match = Utils.splitAt(s, 1);
-      _s = match[1];
-      continue ;
-    };
-  };
+  var partial_arg = [];
   return /* Parser */{
-          runParser: run
+          runParser: (function (param) {
+              var _xs = partial_arg;
+              var _last_seen = "";
+              var _s = param;
+              while(true) {
+                var s = _s;
+                var last_seen = _last_seen;
+                var xs = _xs;
+                if (s.length === 0) {
+                  if (xs.length > 0) {
+                    return [
+                            last_seen,
+                            xs
+                          ];
+                  } else {
+                    return ;
+                  }
+                }
+                var match = Curry._1(p.runParser, s);
+                if (match !== undefined) {
+                  var remainingStr = match[0];
+                  _s = remainingStr;
+                  _last_seen = remainingStr;
+                  _xs = Belt_Array.concat(xs, [match[1]]);
+                  continue ;
+                }
+                var match$1 = Utils.splitAt(s, 1);
+                _s = match$1[1];
+                continue ;
+              };
+            })
         };
 }
 
@@ -159,15 +175,10 @@ function runParser(p, s) {
   return Curry._1(p.runParser, s);
 }
 
-function parseReplCommand(p, s) {
-  return Curry._1(p.runParser, s);
-}
-
 exports.ParserFunctor = ParserFunctor;
 exports.TFP = TFP;
 exports.ParserApplicative = ParserApplicative;
 exports.TAP = TAP;
 exports.ParserAlternative = ParserAlternative;
 exports.runParser = runParser;
-exports.parseReplCommand = parseReplCommand;
 /* TFP Not a pure module */

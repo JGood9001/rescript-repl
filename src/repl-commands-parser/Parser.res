@@ -54,7 +54,7 @@ module TAP = TestApplicative(ParserApplicative)
 
 module ParserAlternative : (Alternative with type t<'a> = parser<'a>) = {
     include ParserApplicative
-    let empty = Parser({ runParser: _ => None }) // pure(None)
+    let empty = Parser({ runParser: _ => None })
     let alternative = (Parser(p1), Parser(p2)) => {
         Parser({
             runParser: s => {
@@ -71,32 +71,36 @@ module ParserAlternative : (Alternative with type t<'a> = parser<'a>) = {
         })
     }
 
+    // let some = (Parser(p)) => {
+    //     // repeatedly invoke parser with s
+    //     // return first case where Some is yielded
+    //     // and drop the first char from the string and retry if None is yielded
+    //     let rec run = s => {
+    //         if Js.String.length(s) == 0 {
+    //             None
+    //         } else {
+    //             switch p.runParser(s) {
+    //                 | Some(x) => Some(x)
+    //                 | None => {
+    //                     let (_, remainingStr) = splitAt(s, 1)
+    //                     run(remainingStr)
+    //                 }
+    //             }
+    //         }
+    //     }
+
+    //     Parser({ runParser: run })
+    // }
+
+     // let some: t<'a> => t<array<'a>>
     let some = (Parser(p)) => {
-        // repeatedly invoke parser with s
-        // return first case where Some is yielded
-        // and drop the first char from the string and retry if None is yielded
-        let rec run = s => {
+        let rec run = (xs, last_seen: string) => s => {
             if Js.String.length(s) == 0 {
-                None
-            } else {
-                switch p.runParser(s) {
-                    | Some(x) => Some(x)
-                    | None => {
-                        let (_, remainingStr) = splitAt(s, 1)
-                        run(remainingStr)
+                    if Js.Array.length(xs) > 0 {
+                        Some(last_seen, xs)
+                    } else {
+                        None
                     }
-                }
-            }
-        }
-
-        Parser({ runParser: run })
-    }
-
-    // let many: t<'a> => t<array<'a>>
-    let many = (Parser(p): parser<string>) => {
-        let rec run = (xs: array<string>, last_seen: string) => s => {
-            if Js.String.length(s) == 0 {
-                Some(last_seen, xs)
             } else {
                 switch p.runParser(s) {
                     | Some((remainingStr, x)) => {
@@ -121,13 +125,42 @@ module ParserAlternative : (Alternative with type t<'a> = parser<'a>) = {
 
         // the above implementation is extremely imperative.
         // TODO: Implement a declarative version...
+        Parser({ runParser: run([], "") })
+    }
 
+    // let many: t<'a> => t<array<'a>>
+    let many = (Parser(p): parser<string>) => {
+        let rec run = (xs: array<string>, last_seen: string) => s => {
+            if Js.String.length(s) == 0 {
+                    Some(last_seen, xs)
+            } else {
+                switch p.runParser(s) {
+                    | Some((remainingStr, x)) => {
+                        // NOTE:
+                        // mutating this array here yields buggy results...
+                        // Strangely enough, the bug doesn't occur when using
+                        // Parser.runParser(openModuleLinesP, codeStr)
+                        // but when invoking it with other parsers, the results are duplicated
+                        // Parser.runParser(openModuleSectionP, codeStr)
+                        // Belt.Array.push(xs, x)
+                        run(Belt.Array.concat(xs, [x]), remainingStr, remainingStr)
+                    }
+                    | None => {
+                        // last_seen is a dirty imperative hack to maintain the remainingStr
+                        // that was last seen at the time of the last successful parse which matched...
+                        let (_, remainingStr) = splitAt(s, 1)
+                        run(xs, last_seen, remainingStr)
+                    }
+                }
+            }
+        }
+
+        // the above implementation is extremely imperative.
+        // TODO: Implement a declarative version...
         Parser({ runParser: run([], "") })
     }
 }
 
 let runParser = (Parser(p), s: string) =>
     p.runParser(s) 
-
-let parseReplCommand = (Parser(p), s: string): parseResult<replCommand> =>
-    p.runParser(s)
+    

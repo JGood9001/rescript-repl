@@ -71,7 +71,7 @@ module FileOperations = {
     let read = (Filepath(s)) => {
         // So long as the string passed in refers to a filepath, then the only case
         // which throws an exception is where the file doesn't exist.
-        let initialContents = "// Module Imports\n"
+        let initialContents = ""
         if isFilepath(s) {
             try {
                 readFileSync(s, "utf8")
@@ -173,7 +173,8 @@ let parseReplCommand = s => {
     let xs = [
         Parser.runParser(loadCommandP, s),
         Parser.runParser(startMultiLineCommandP, s),
-        Parser.runParser(endMultiLineCommandP, s)
+        Parser.runParser(endMultiLineCommandP, s),
+        Parser.runParser(resetCommandP, s)
     ]
     let ys = Js.Array.filter(x => Belt.Option.isSome(x), xs)
 
@@ -234,6 +235,36 @@ let handleBuildAndEval = (code_str, module(FO : FileOperations), module(RB : Res
     }) // ->ignore
 }
 
+let handleLoadModuleBuildAndEval = (code_str, module(FO : FileOperations), module(RB : RescriptBuild), module(EvalJS : EvalJavaScriptCode)) => {
+    let prevContents = FO.read(Filepath("./src/RescriptREPL.res"))
+    // The only difference is in this line... so just make a single function which takes a HoF
+    FO.write(Filepath("./src/RescriptREPL.res"), code_str)
+    RB.build()
+    -> Promise.then(result => {
+        Promise.make((resolve, _reject) => {
+            switch result {
+                | BuildFail => {
+                    // Rolling back the contents of RescriptREPL.res to the previous contents
+                    FO.write(Filepath("./src/RescriptREPL.res"), prevContents)
+                    resolve(. ())
+                }
+                | BuildSuccess => {
+                    let jsCodeStr = FO.read(Filepath("./src/RescriptREPL.bs.js"))
+                    // Changed EvalJS.eval to return a promise, as if you don't wait for the stdout to be printed, then this will prevent the prompt icon
+                    // from being displayed.
+                    EvalJS.eval(JavaScriptCode(jsCodeStr), module(FO))
+                    ->then(_ => {
+                        if startsOrEndsWithJsLog(code_str) {
+                            FO.write(Filepath("./src/RescriptREPL.res"), prevContents)
+                        }
+                        resolve(. ())
+                    })->ignore
+                }
+            }
+        })
+    }) // ->ignore
+}
+
 let handleEndMultiLineCase = (state: domainLogicState, module (FO: FileOperations), module (RB: RescriptBuild), module (EvalJS: EvalJavaScriptCode)): Promise.t<domainLogicState> => {
     switch state.multilineMode.rescriptCodeInput {
         | Some(codeStr) => {
@@ -266,40 +297,53 @@ let handleRescriptCodeCase = (state: domainLogicState, nextCodeStr: string, modu
     })
 }
 
+let handleLoadModuleCase = (moduleName: string, module (FO: FileOperations), module (RB: RescriptBuild), module (EvalJS: EvalJavaScriptCode)): Promise.t<()> => {
+    let codeStr = FO.read(Filepath("./src/RescriptREPL.res"))
+    switch Parser.runParser(openModuleSectionP, codeStr) {
+        | Some((remainingCodeStr, OpenModuleSection(openModuleSectionStr))) => {
+            let nextCodeStr = openModuleSectionStr ++ `open ${moduleName}` ++ remainingCodeStr
+
+            handleLoadModuleBuildAndEval(nextCodeStr, module(FO), module(RB), module(EvalJS))
+            -> Promise.then(_result => {
+                Promise.make((resolve, _reject) => resolve(. ()))
+            })
+        }
+        | None => {
+            // There are currently no 'open Module' declarations beneath the // Module Imports comment, so kick it off here
+            let nextCodeStr = `open ${moduleName}` ++ "\n" ++ codeStr
+
+            handleLoadModuleBuildAndEval(nextCodeStr, module(FO), module(RB), module(EvalJS))
+            -> Promise.then(_result => {
+                Promise.make((resolve, _reject) => resolve(. ()))
+            })
+        }
+    }
+}
+
 // I also had a :reset command in the first version which would wipe the file clean...
 let parseAndHandleCommands = (state: domainLogicState, s: string, module(FO : FileOperations), module(RB : RescriptBuild), module(EvalJS : EvalJavaScriptCode)) => {
     Promise.make((resolve, _reject) => {
         switch parseReplCommand(s) {
             | StartMultiLineMode => {
-                let updated_state = { multilineMode: { active: true, rescriptCodeInput: Some("") }}
-                resolve(. DomainLogicAlg.Continue(updated_state))
+                let updatedState = { multilineMode: { active: true, rescriptCodeInput: Some("") }}
+                resolve(. DomainLogicAlg.Continue(updatedState))
             }
             | EndMultiLineMode => {
                 handleEndMultiLineCase(state, module(FO), module(RB), module(EvalJS))
                 ->then(updatedState => resolve(. DomainLogicAlg.Continue(updatedState)))->ignore
             }
-            // TODO/LLO
-            // This works, but now the :load command should be updated to
-            // :load Utils
-            // rather than
-            // :load Utils.res
             | LoadModule(moduleName) => {
-                let codeStr = FO.read(Filepath("./src/RescriptREPL.res"))
-                switch Parser.runParser(openModuleSectionP, codeStr) {
-                    | Some((remainingCodeStr, OpenModuleSection(openModuleSectionStr))) => {
-                        let nextCodeStr = openModuleSectionStr ++ `open ${moduleName}` ++ remainingCodeStr
-      
-                        handleBuildAndEval(nextCodeStr, module(FO), module(RB), module(EvalJS))
-                        ->then(_ => resolve(. DomainLogicAlg.Continue(state)))->ignore
-                    }
-                    | None => Js.Exn.raiseError("ERROR: failed to parse for the module import section of the rescript file")
-                }
+                handleLoadModuleCase(moduleName, module(FO), module(RB), module(EvalJS))
+                ->then(_ => resolve(. DomainLogicAlg.Continue(state)))->ignore
             }
             | RescriptCode(nextCodeStr) => {
                 handleRescriptCodeCase(state, nextCodeStr, module(FO), module(RB), module(EvalJS))
                 ->then(nextState => resolve(. DomainLogicAlg.Continue(nextState)))->ignore
             }
-            // | Reset => FO.write("./src/RescriptREPL.res", "")
+            | Reset => {
+                FO.write(Filepath("./src/RescriptREPL.res"), "")
+                resolve(. DomainLogicAlg.Continue(state))
+            }
         }
     })
 }

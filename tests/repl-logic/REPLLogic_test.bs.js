@@ -6,10 +6,10 @@ var REPLLogic = require("../../src/repl-logic/REPLLogic.bs.js");
 var TestUtils = require("../repl-commands-parser/test-utils/TestUtils.bs.js");
 
 Test.test("Successfully parses the ':load' command", (function (param) {
-        var result = REPLLogic.parseReplCommand(":load some_filename.res");
+        var result = REPLLogic.parseReplCommand(":load Utils");
         TestUtils.equals(undefined, {
               TAG: /* LoadModule */1,
-              _0: "some_filename"
+              _0: "Utils"
             }, result);
       }));
 
