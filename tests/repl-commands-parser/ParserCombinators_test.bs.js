@@ -7,12 +7,12 @@ var TestUtils = require("./test-utils/TestUtils.bs.js");
 var ParserCombinators = require("../../src/repl-commands-parser/ParserCombinators.bs.js");
 
 Test.test("Successfully parses appropriate input for the ':load' command", (function (param) {
-        var result = Parser.runParser(ParserCombinators.loadCommandP, ":load some_filename.res");
+        var result = Parser.runParser(ParserCombinators.loadCommandP, ":load Utils");
         TestUtils.equals(undefined, [
               "",
               {
                 TAG: /* LoadModule */1,
-                _0: "some_filename"
+                _0: "Utils"
               }
             ], result);
       }));
@@ -90,6 +90,31 @@ Test.test("rescriptCodeStartsOrEndsWithJsLogP Successfully parses when the strin
             ], result);
       }));
 
+Test.test("Parser.ParserAlternative.many Successfully parsesg many a's", (function (param) {
+        var result = Parser.runParser(Parser.ParserAlternative.many(ParserCombinators.str("a")), "aaab");
+        var expected = [
+          "b",
+          [
+            "a",
+            "a",
+            "a"
+          ]
+        ];
+        TestUtils.equals(undefined, expected, result);
+      }));
+
+Test.test("Parser.ParserAlternative.many Successfully parses many a's", (function (param) {
+        var result = Parser.runParser(Parser.ParserAlternative.many(ParserCombinators.str("ab")), "ababzr");
+        var expected = [
+          "zr",
+          [
+            "ab",
+            "ab"
+          ]
+        ];
+        TestUtils.equals(undefined, expected, result);
+      }));
+
 Test.test("openModuleLineP Successfully parses the a module import from a string of rescript code", (function (param) {
         var restCodeStr = "\r\n        let x = 100\r\n        Js.log(x + 100)\r\n    ";
         var codeStr = "open Utils\n" + restCodeStr;
@@ -116,31 +141,6 @@ Test.test("openModuleLinesP Successfully parses a section of module imports from
         TestUtils.equals(undefined, expected, result);
       }));
 
-Test.test("Parser.ParserAlternative.many Successfully parsesg many a's", (function (param) {
-        var result = Parser.runParser(Parser.ParserAlternative.many(ParserCombinators.str("a")), "aaab");
-        var expected = [
-          "b",
-          [
-            "a",
-            "a",
-            "a"
-          ]
-        ];
-        TestUtils.equals(undefined, expected, result);
-      }));
-
-Test.test("Parser.ParserAlternative.many Successfully parses many a's", (function (param) {
-        var result = Parser.runParser(Parser.ParserAlternative.many(ParserCombinators.str("ab")), "ababzr");
-        var expected = [
-          "zr",
-          [
-            "ab",
-            "ab"
-          ]
-        ];
-        TestUtils.equals(undefined, expected, result);
-      }));
-
 Test.test("openModuleSectionP Successfully parses the module import section from the remaining code in a string of rescript code", (function (param) {
         var moduleSectionStr = "// Module Imports\nopen Utils\nopen ParserCombinators";
         var restCodeStr = "\r\n        let x = 100\r\n        Js.log(x + 100)\r\n    ";
@@ -149,10 +149,16 @@ Test.test("openModuleSectionP Successfully parses the module import section from
         var expected = [
           "\n" + restCodeStr,
           /* OpenModuleSection */{
-            _0: moduleSectionStr + "\n"
+            _0: "open Utils\nopen ParserCombinators\n"
           }
         ];
         TestUtils.equals(undefined, expected, result);
+      }));
+
+Test.test("openModuleSectionP Successfully parses the module import section from the remaining code in a string of rescript code when there are no open Module definitions beneath the // Module Imports section", (function (param) {
+        var codeStr = "// Module Imports\n\n\r\n        // Code\r\n        let x = 100\r\n        Js.log(x + 100)\r\n    ";
+        var result = Parser.runParser(ParserCombinators.openModuleSectionP, codeStr);
+        TestUtils.equals(undefined, undefined, result);
       }));
 
 /*  Not a pure module */

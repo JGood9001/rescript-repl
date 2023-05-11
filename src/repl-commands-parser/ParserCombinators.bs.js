@@ -6,6 +6,8 @@ var Parser = require("./Parser.bs.js");
 var $$String = require("rescript/lib/js/string.js");
 var Js_string = require("rescript/lib/js/js_string.js");
 var Belt_Array = require("rescript/lib/js/belt_Array.js");
+var Caml_array = require("rescript/lib/js/caml_array.js");
+var Belt_Option = require("rescript/lib/js/belt_Option.js");
 
 function matchStr(stringToMatch, inputStr) {
   return Js_string.slice(0, stringToMatch.length, inputStr) === stringToMatch;
@@ -123,19 +125,129 @@ function takeUntil(pattern) {
         };
 }
 
-var rescriptFileP = Parser.ParserApplicative.apply(Parser.ParserApplicative.fmap((function (filename, ext) {
+function takeWhile(s, xs) {
+  var match = Js_string.split("", s).reduce((function (param, $$char) {
+          var s2 = param[1];
+          var idx = param[0];
+          if (Belt_Option.isSome(s2) && xs.includes($$char)) {
             return [
-                    filename,
-                    ext
+                    idx + 1 | 0,
+                    Belt_Option.map(s2, (function (x) {
+                            return x + $$char;
+                          }))
                   ];
-          }), takeUntil(".")), str(".res"));
+          } else {
+            return [
+                    idx,
+                    undefined
+                  ];
+          }
+        }), [
+        0,
+        ""
+      ]);
+  var matchedStr = match[1];
+  if (matchedStr === undefined) {
+    return [
+            s,
+            ""
+          ];
+  }
+  var match$1 = Utils.splitAt(s, match[0]);
+  return [
+          match$1[1],
+          matchedStr
+        ];
+}
 
-var loadCommandP = Parser.ParserApplicative.apply(Parser.ParserApplicative.apply(Parser.ParserApplicative.fmap((function (param, param$1, param$2) {
-                return {
-                        TAG: /* LoadModule */1,
-                        _0: param$2[0]
-                      };
-              }), str(":load")), space), rescriptFileP);
+function any(pattern) {
+  return /* Parser */{
+          runParser: (function (s) {
+              var match = takeWhile(s, pattern);
+              var remainingStr = match[0];
+              if (remainingStr === s) {
+                return ;
+              } else {
+                return [
+                        remainingStr,
+                        match[1]
+                      ];
+              }
+            })
+        };
+}
+
+var validModuleNameChars = [
+  "a",
+  "b",
+  "c",
+  "d",
+  "e",
+  "f",
+  "g",
+  "h",
+  "i",
+  "j",
+  "k",
+  "l",
+  "m",
+  "n",
+  "o",
+  "p",
+  "q",
+  "r",
+  "s",
+  "t",
+  "u",
+  "v",
+  "w",
+  "x",
+  "y",
+  "z",
+  "A",
+  "B",
+  "C",
+  "D",
+  "E",
+  "F",
+  "G",
+  "H",
+  "I",
+  "J",
+  "K",
+  "L",
+  "M",
+  "N",
+  "O",
+  "P",
+  "Q",
+  "R",
+  "S",
+  "T",
+  "U",
+  "V",
+  "W",
+  "X",
+  "Y",
+  "Z",
+  "0",
+  "1",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "7",
+  "8",
+  "9"
+];
+
+var loadCommandP = Parser.ParserApplicative.apply(Parser.ParserApplicative.apply(Parser.ParserApplicative.apply(Parser.ParserApplicative.fmap((function (param, param$1, moduleName, param$2) {
+                    return {
+                            TAG: /* LoadModule */1,
+                            _0: moduleName
+                          };
+                  }), str(":load")), space), any(validModuleNameChars)), empty);
 
 var startMultiLineCommandP = Parser.ParserApplicative.apply(Parser.ParserApplicative.fmap((function (param, param$1) {
             return /* StartMultiLineMode */0;
@@ -145,39 +257,43 @@ var endMultiLineCommandP = Parser.ParserApplicative.apply(Parser.ParserApplicati
             return /* EndMultiLineMode */1;
           }), str("}:")), empty);
 
+var resetCommandP = Parser.ParserApplicative.apply(Parser.ParserApplicative.fmap((function (param, param$1) {
+            return /* Reset */2;
+          }), str(":reset")), empty);
+
 var rescriptCodeStartsWithJsLogP = Parser.ParserApplicative.fmap((function (x) {
         return x;
       }), str("Js.log"));
 
 var rescriptCodeEndsWithJsLogP = Parser.ParserApplicative.apply(Parser.ParserApplicative.fmap((function (x, param) {
-            return x;
+            return Caml_array.get(x, 0);
           }), Parser.ParserAlternative.some(str("->Js.log"))), empty);
 
 var rescriptCodeStartsOrEndsWithJsLogP = Parser.ParserAlternative.alternative(rescriptCodeStartsWithJsLogP, rescriptCodeEndsWithJsLogP);
 
-var rescriptFileP$1 = Parser.ParserApplicative.apply(Parser.ParserApplicative.fmap((function (x, param) {
-            return x;
+var rescriptFileP = Parser.ParserApplicative.apply(Parser.ParserApplicative.fmap((function (x, param) {
+            return Caml_array.get(x, 0);
           }), Parser.ParserAlternative.some(str(".res"))), empty);
 
 var javascriptFileP = Parser.ParserApplicative.apply(Parser.ParserApplicative.fmap((function (x, param) {
-            return x;
+            return Caml_array.get(x, 0);
           }), Parser.ParserAlternative.some(str(".bs.js"))), empty);
 
-var rescriptJavascriptFileP = Parser.ParserAlternative.alternative(rescriptFileP$1, javascriptFileP);
+var rescriptJavascriptFileP = Parser.ParserAlternative.alternative(rescriptFileP, javascriptFileP);
 
 var openModuleLineP = Parser.ParserApplicative.apply(Parser.ParserApplicative.apply(Parser.ParserApplicative.fmap((function (openStr, _space, moduleName) {
                 return openStr + " " + moduleName + "\n";
               }), str("open")), space), takeUntil("\n"));
 
-var openModuleLinesP = Parser.ParserAlternative.many(openModuleLineP);
+var openModuleLinesP = Parser.ParserAlternative.some(openModuleLineP);
 
-var openModuleSectionP = Parser.ParserApplicative.apply(Parser.ParserApplicative.fmap((function (x, openModuleLines) {
-            return /* OpenModuleSection */{
-                    _0: x + "\n" + Belt_Array.reduce(openModuleLines, "", (function (a, b) {
-                            return a + b;
-                          }))
-                  };
-          }), str("// Module Imports")), openModuleLinesP);
+var openModuleSectionP = Parser.ParserApplicative.fmap((function (openModuleLines) {
+        return /* OpenModuleSection */{
+                _0: Belt_Array.reduce(openModuleLines, "", (function (a, b) {
+                        return a + b;
+                      }))
+              };
+      }), openModuleLinesP);
 
 exports.matchStr = matchStr;
 exports.charToString = charToString;
@@ -188,16 +304,20 @@ exports.empty = empty;
 exports.collectUntil = collectUntil;
 exports.contCollectUntil = contCollectUntil;
 exports.takeUntil = takeUntil;
+exports.takeWhile = takeWhile;
+exports.any = any;
+exports.validModuleNameChars = validModuleNameChars;
 exports.loadCommandP = loadCommandP;
 exports.startMultiLineCommandP = startMultiLineCommandP;
 exports.endMultiLineCommandP = endMultiLineCommandP;
+exports.resetCommandP = resetCommandP;
 exports.rescriptCodeStartsWithJsLogP = rescriptCodeStartsWithJsLogP;
 exports.rescriptCodeEndsWithJsLogP = rescriptCodeEndsWithJsLogP;
 exports.rescriptCodeStartsOrEndsWithJsLogP = rescriptCodeStartsOrEndsWithJsLogP;
-exports.rescriptFileP = rescriptFileP$1;
+exports.rescriptFileP = rescriptFileP;
 exports.javascriptFileP = javascriptFileP;
 exports.rescriptJavascriptFileP = rescriptJavascriptFileP;
 exports.openModuleLineP = openModuleLineP;
 exports.openModuleLinesP = openModuleLinesP;
 exports.openModuleSectionP = openModuleSectionP;
-/* rescriptFileP Not a pure module */
+/* loadCommandP Not a pure module */

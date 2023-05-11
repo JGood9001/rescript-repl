@@ -49,7 +49,7 @@ function write(s, contents) {
 
 function read(s) {
   var s$1 = s._0;
-  var initialContents = "// Module Imports\n";
+  var initialContents = "";
   if (isFilepath(s$1)) {
     try {
       return Fs.readFileSync(s$1, "utf8");
@@ -144,7 +144,8 @@ function parseReplCommand(s) {
   var xs = [
     Parser.runParser(ParserCombinators.loadCommandP, s),
     Parser.runParser(ParserCombinators.startMultiLineCommandP, s),
-    Parser.runParser(ParserCombinators.endMultiLineCommandP, s)
+    Parser.runParser(ParserCombinators.endMultiLineCommandP, s),
+    Parser.runParser(ParserCombinators.resetCommandP, s)
   ];
   var ys = Js_array.filter(Belt_Option.isSome, xs);
   if (ys.length === 0) {
@@ -181,6 +182,38 @@ function handleBuildAndEval(code_str, FO, RB, EvalJS) {
   Curry._2(FO.write, /* Filepath */{
         _0: "./src/RescriptREPL.res"
       }, prevContents + "\n" + code_str);
+  return Curry._1(RB.build, undefined).then(function (result) {
+              return new Promise((function (resolve, _reject) {
+                            if (result) {
+                              Curry._2(FO.write, /* Filepath */{
+                                    _0: "./src/RescriptREPL.res"
+                                  }, prevContents);
+                              return resolve(undefined);
+                            }
+                            var jsCodeStr = Curry._1(FO.read, /* Filepath */{
+                                  _0: "./src/RescriptREPL.bs.js"
+                                });
+                            then(Curry._2(EvalJS.$$eval, /* JavaScriptCode */{
+                                      _0: jsCodeStr
+                                    }, FO), (function (param) {
+                                    if (startsOrEndsWithJsLog(code_str)) {
+                                      Curry._2(FO.write, /* Filepath */{
+                                            _0: "./src/RescriptREPL.res"
+                                          }, prevContents);
+                                    }
+                                    resolve(undefined);
+                                  }));
+                          }));
+            });
+}
+
+function handleLoadModuleBuildAndEval(code_str, FO, RB, EvalJS) {
+  var prevContents = Curry._1(FO.read, /* Filepath */{
+        _0: "./src/RescriptREPL.res"
+      });
+  Curry._2(FO.write, /* Filepath */{
+        _0: "./src/RescriptREPL.res"
+      }, code_str);
   return Curry._1(RB.build, undefined).then(function (result) {
               return new Promise((function (resolve, _reject) {
                             if (result) {
@@ -246,26 +279,57 @@ function handleRescriptCodeCase(state, nextCodeStr, FO, RB, EvalJS) {
               }));
 }
 
+function handleLoadModuleCase(moduleName, FO, RB, EvalJS) {
+  var codeStr = Curry._1(FO.read, /* Filepath */{
+        _0: "./src/RescriptREPL.res"
+      });
+  var match = Parser.runParser(ParserCombinators.openModuleSectionP, codeStr);
+  if (match !== undefined) {
+    var nextCodeStr = match[1]._0 + ("open " + moduleName + "") + match[0];
+    return handleLoadModuleBuildAndEval(nextCodeStr, FO, RB, EvalJS).then(function (_result) {
+                return new Promise((function (resolve, _reject) {
+                              resolve(undefined);
+                            }));
+              });
+  }
+  var nextCodeStr$1 = "open " + moduleName + "\n" + codeStr;
+  return handleLoadModuleBuildAndEval(nextCodeStr$1, FO, RB, EvalJS).then(function (_result) {
+              return new Promise((function (resolve, _reject) {
+                            resolve(undefined);
+                          }));
+            });
+}
+
 function parseAndHandleCommands(state, s, FO, RB, EvalJS) {
   return new Promise((function (resolve, _reject) {
                 var moduleName = parseReplCommand(s);
                 if (typeof moduleName === "number") {
-                  if (moduleName === /* StartMultiLineMode */0) {
-                    return resolve(/* Continue */{
-                                _0: {
-                                  multilineMode: {
-                                    active: true,
-                                    rescriptCodeInput: ""
-                                  }
-                                }
-                              });
+                  switch (moduleName) {
+                    case /* StartMultiLineMode */0 :
+                        return resolve(/* Continue */{
+                                    _0: {
+                                      multilineMode: {
+                                        active: true,
+                                        rescriptCodeInput: ""
+                                      }
+                                    }
+                                  });
+                    case /* EndMultiLineMode */1 :
+                        then(handleEndMultiLineCase(state, FO, RB, EvalJS), (function (updatedState) {
+                                resolve(/* Continue */{
+                                      _0: updatedState
+                                    });
+                              }));
+                        return ;
+                    case /* Reset */2 :
+                        Curry._2(FO.write, /* Filepath */{
+                              _0: "./src/RescriptREPL.res"
+                            }, "");
+                        return resolve(/* Continue */{
+                                    _0: state
+                                  });
+                    
                   }
-                  then(handleEndMultiLineCase(state, FO, RB, EvalJS), (function (updatedState) {
-                          resolve(/* Continue */{
-                                _0: updatedState
-                              });
-                        }));
-                  return ;
                 } else {
                   if (moduleName.TAG === /* RescriptCode */0) {
                     then(handleRescriptCodeCase(state, moduleName._0, FO, RB, EvalJS), (function (nextState) {
@@ -275,15 +339,7 @@ function parseAndHandleCommands(state, s, FO, RB, EvalJS) {
                           }));
                     return ;
                   }
-                  var codeStr = Curry._1(FO.read, /* Filepath */{
-                        _0: "./src/RescriptREPL.res"
-                      });
-                  var match = Parser.runParser(ParserCombinators.openModuleSectionP, codeStr);
-                  if (match === undefined) {
-                    return Js_exn.raiseError("ERROR: failed to parse for the module import section of the rescript file");
-                  }
-                  var nextCodeStr = match[1]._0 + ("open " + moduleName._0 + "") + match[0];
-                  then(handleBuildAndEval(nextCodeStr, FO, RB, EvalJS), (function (param) {
+                  then(handleLoadModuleCase(moduleName._0, FO, RB, EvalJS), (function (param) {
                           resolve(/* Continue */{
                                 _0: state
                               });
@@ -305,7 +361,9 @@ exports.parseReplCommand = parseReplCommand;
 exports.startsOrEndsWithJsLog = startsOrEndsWithJsLog;
 exports.then = then;
 exports.handleBuildAndEval = handleBuildAndEval;
+exports.handleLoadModuleBuildAndEval = handleLoadModuleBuildAndEval;
 exports.handleEndMultiLineCase = handleEndMultiLineCase;
 exports.handleRescriptCodeCase = handleRescriptCodeCase;
+exports.handleLoadModuleCase = handleLoadModuleCase;
 exports.parseAndHandleCommands = parseAndHandleCommands;
 /* fs Not a pure module */

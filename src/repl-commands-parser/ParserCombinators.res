@@ -42,7 +42,6 @@ let empty: parser<string> =
         ("" == s) ? Some((s, s)) : None
     }})
 
-
 let rec collectUntil = (s: string, pattern: string): option<(string, string)> => {
     let (x, remainingStr) = splitAt(s, 1)
     x == pattern ? Some((x, remainingStr)) : contCollectUntil(x, remainingStr, pattern)
@@ -63,16 +62,50 @@ let takeUntil = (pattern: string): parser<string> =>
         }
     }})
 
-let rescriptFileP: parser<(string, string)> =
-    ((filename, ext) => (filename, ext))
-    ->ParserApplicative.fmap(takeUntil("."))
-    ->ParserApplicative.apply(str(".res"))
+// input = "Utils not_valid_module_str"
+// output = (" not_valid_module_str", "Utils")
+let takeWhile = (s: string, xs: array<string>) => {
+    let (idx, matchedStr) =
+        Js.String.split("", s)->Js.Array2.reduce(((idx, s2), char) => {
+            // Js.Array2.includes(["a", "b", "c"], "b") == true
+            if Belt.Option.isSome(s2) && Js.Array2.includes(xs, char) {
+                (idx + 1, Belt.Option.map(s2, x => x ++ char))
+            } else {
+                (idx, None)
+            }
+        }, (0, Some("")))
+
+    switch matchedStr {
+        | Some(x) => {
+            let (_, remainingStr) = splitAt(s, idx)
+            (remainingStr, x)
+        }
+        | None => (s, "")
+    }
+}
+
+let any = (pattern: array<string>): parser<string> =>
+    Parser({ runParser: s => {
+        let (remainingStr, matchedStr) = takeWhile(s, pattern)
+        if remainingStr == s {
+            None
+        }  else {
+            Some((remainingStr, matchedStr))
+        }
+    }})
+
+let validModuleNameChars = [
+    "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
+    "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z",
+    "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"
+]
 
 let loadCommandP: parser<replCommand> = {
-    ((_, _, (moduleName, _)) => LoadModule(moduleName))
+    ((_, _, moduleName, _) => LoadModule(moduleName))
     ->ParserApplicative.fmap(str(":load"))
     ->ParserApplicative.apply(space)
-    ->ParserApplicative.apply(rescriptFileP)
+    ->ParserApplicative.apply(any(validModuleNameChars))
+    ->ParserApplicative.apply(empty)
 }
 
 let startMultiLineCommandP: parser<replCommand> =
@@ -80,6 +113,10 @@ let startMultiLineCommandP: parser<replCommand> =
 
 let endMultiLineCommandP: parser<replCommand> =
     ((_, _) => EndMultiLineMode)->ParserApplicative.fmap(str("}:"))->ParserApplicative.apply(empty)
+
+let resetCommandP: parser<replCommand> =
+    ((_, _) => Reset)->ParserApplicative.fmap(str(":reset"))->ParserApplicative.apply(empty)
+
 
 let rescriptCodeStartsWithJsLogP: parser<string> =
     (x => x)->ParserApplicative.fmap(str("Js.log"))
@@ -89,16 +126,16 @@ let rescriptCodeStartsWithJsLogP: parser<string> =
 // ^^ TODO/LLO:
 // Implement this, as it's what is currently breaking the REPL flow for what I implemented in REPLLogic.res
 let rescriptCodeEndsWithJsLogP: parser<string> =
-    ((x, _) => x)->ParserApplicative.fmap(ParserAlternative.some(str("->Js.log")))->ParserApplicative.apply(empty)
+    ((x, _) => x[0])->ParserApplicative.fmap(ParserAlternative.some(str("->Js.log")))->ParserApplicative.apply(empty)
 
 let rescriptCodeStartsOrEndsWithJsLogP: parser<string> =
     ParserAlternative.alternative(rescriptCodeStartsWithJsLogP, rescriptCodeEndsWithJsLogP)
 
 let rescriptFileP: parser<string> =
-    ((x, _) => x)->ParserApplicative.fmap(ParserAlternative.some(str(".res")))->ParserApplicative.apply(empty)
+    ((x, _) => x[0])->ParserApplicative.fmap(ParserAlternative.some(str(".res")))->ParserApplicative.apply(empty)
 
 let javascriptFileP: parser<string> =
-    ((x, _) => x)->ParserApplicative.fmap(ParserAlternative.some(str(".bs.js")))->ParserApplicative.apply(empty)
+    ((x, _) => x[0])->ParserApplicative.fmap(ParserAlternative.some(str(".bs.js")))->ParserApplicative.apply(empty)
 
 let rescriptJavascriptFileP =
     ParserAlternative.alternative(rescriptFileP, javascriptFileP)
@@ -111,13 +148,10 @@ let openModuleLineP =
 
 // Going to need to implement Alternative.many, as you'll want to retrieve all lines that start with open
 let openModuleLinesP =
-    ParserAlternative.many(openModuleLineP)
+    ParserAlternative.some(openModuleLineP)
 
 type openModuleSection = OpenModuleSection(string)
 
 let openModuleSectionP: parser<openModuleSection> =
-    ((x, openModuleLines) => {
-        OpenModuleSection(x ++ "\n" ++ Belt.Array.reduce(openModuleLines, "", (a, b) => a ++ b))
-    })
-    ->ParserApplicative.fmap(str("// Module Imports"))
-    ->ParserApplicative.apply(openModuleLinesP)
+    ((openModuleLines) => OpenModuleSection(Belt.Array.reduce(openModuleLines, "", (a, b) => a ++ b)))
+    ->ParserApplicative.fmap(openModuleLinesP)
