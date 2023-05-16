@@ -1,276 +1,171 @@
-// https://forum.rescript-lang.org/t/js-api-to-compile-rescript-to-js/869/7
-// https://github.com/rescript-lang/rescript-compiler/pull/4518
+// const repl = require("node:repl")
 
-// https://forum.rescript-lang.org/t/node-js-official-bindings/2193/10?u=jamesg
-// https://www.npmjs.com/package/rescript-nodejs
-// https://github.com/TheSpyder/rescript-nodejs/blob/main/src/Process.res#L143
-// https://github.com/TheSpyder/rescript-nodejs/blob/main/src/Readline.res#L57
+// @module("fs") external writeFileSync: string => string => () = "writeFileSync"
+type replOptions<'a, 'b, 'c> = { 
+    prompt: string,
+    // Don't care about types 'b and 'c, but 'a should be any arbitrary type such that the repl will
+    // display the result the same as a Node REPL does.
+    eval: 'a => 'b => 'c => ((unit, 'a) => unit) => Promise.t<unit>
+}
+type command = string
 
-// https://forum.rescript-lang.org/t/plans-to-provide-a-rescript-repl/525/5
-open NodeJs
+type t
 
-@module("fs") external readFileSync: string => string => string = "readFileSync"
-@module("fs") external writeFileSync: string => string => () = "writeFileSync"
-@module("fs") external writeFile: string => string => (string => ()) => () = "writeFile"
-@module("fs") external unlinkSync: string => () = "unlinkSync"
-external eval: string => () = "eval"
-external setTimeout: (() => ()) => string => () = "setTimeout"
-
-// May 4th FIX:
-// - If ./src/RescriptRepl.res | ./src/RescriptRepl.bs.js don't exist when "close" event is received,
-//   then don't attempt to remove them... prints out a node error to the user if you do.
-
-// Need to see if I can create an interface which wraps Readline (so I can supply a test instance)
-// https://github.com/TheSpyder/rescript-nodejs/blob/main/src/Readline.res
-// https://nodejs.org/api/readline.html#class-interfaceconstructor
-// https://github.com/TheSpyder/rescript-nodejs/blob/main/src/Readline.res#L57
-// Every instance is associated with a single input Readable stream and a single output Writable stream.
-// The output stream is used to print prompts for user input that arrives on, and is read from, the input stream.
-// ^^ So the test implementation will need to emulate this.
-let rl = Readline.make(
-    Readline.interfaceOptions(~input=Process.process->Process.stdin, ~output=Process.process->Process.stdout, ()),
-)
-
-// https://github.com/TheSpyder/rescript-nodejs/blob/main/src/Readline.res#L38
-// {
-//     Readline.Interface.on(Readline.Events.close(rl, () => {
-//         Js.log("CLEANING UP")
-//         Process.process->Process.exit(())
-//     }))
-
-//     // Readline.Interface.on(rl, ())
-//     ()
-// }
-
-rl
-->Readline.Interface.on(Event.fromString("close"), () => {
-  Js.log("See You Space Cowboy")
-  // remove files
-  unlinkSync("./src/RescriptRepl.res")
-  unlinkSync("./src/RescriptRepl.bs.js")
-}) -> ignore
-
-let prompt = query =>
-    Promise.make((resolve, _reject) => rl->Readline.Interface.question(query, x => resolve(. x)))
-
-let write = (filename, contents) =>
-    writeFileSync(filename, contents)
-    // asyncrhonous writeFile is problematic when I want to reset the file contents
-    // writeFile(filename, contents, err => {
-    //             if !Js.isNullable(Js.Nullable.return(err)) {
-    //                 Js.Exn.raiseError(err)
-    //             }
-    //             // file written successfully
-    //         })
-
-let rewrite = (filename, contents) => {
-    unlinkSync(filename)
-    write(filename, contents)
+module Repl = {
+    @send
+    external defineCommand: (t, command, @uncurry ('a => unit)) => unit = "defineCommand"
+    @send
+    external displayPrompt: t => unit = "displayPrompt"
+    @send
+    external on: t => string => (unit => unit) => unit = "on"
 }
 
-let handle_get_next_contents = s => {
-    try {
-        let contents = readFileSync("./src/RescriptRepl.res", "utf8")
-        (contents, contents ++ "\n" ++ s)
-    } catch {
-        | Js.Exn.Error(_obj) => ("", s)
+@module("node:repl") external start: replOptions<'a, 'b, 'c> => t = "start"
+
+// type multiLineMode = { active: bool, rescriptCodeInput: option<string> }
+let multilineModeState = ref({ "active": false, "rescriptCodeInput": None })
+
+let isRecoverableError = error => {
+    let err = NodeJs.Errors.Error.toJsExn(error)
+    if (Js.Exn.name(err)->Belt.Option.getUnsafe === "SyntaxError") {
+        let re = %re("/^(Unexpected end of input|Unexpected token)/g")
+        Js.Re.test_(re, Js.Exn.message(err)->Belt.Option.getUnsafe)
+    } else {
+        false
     }
 }
 
-// https://github.com/TheSpyder/rescript-nodejs/blob/main/src/ChildProcess.res#L81
-// external exec: (string, (Js.nullable<Js.Exn.t>, Buffer.t, Buffer.t) => unit) => t = "exec"
-let build_rescript_code = (prev_contents, f) => {
-    ChildProcess.exec("npm run res:build", (error, stdout, stderr) => {
-        if (!Js.isNullable(error)) {
-            // https://rescript-lang.org/docs/manual/latest/api/js/nullable#bind
-            Js.Nullable.bind(error, (. error_str) => {
-                switch error_str -> Js.Exn.message {
-                    // Need to see if the compile error which caused the rescript
-                    // to fail building can be displayed here...
-                    | Some(msg) => {
-                        Js.log("ERROR: " ++ msg)
-                        // TODO: Will need to see if I can improve highlighting the error later, but for now
-                        // this at least outputs whether the build succeeded/failed and will highlight the error
-                        // that caused it within the RescriptRepl.res file.
-                        Js.log("stdout: " ++ Buffer.toString(stdout))
+// let f = () => {
+//     Js.log("line 1")
+//     Js.log("line 2")
+// }
 
-                        // Rollback to last successful file build
-                        write("./src/RescriptRepl.res", prev_contents) -> ignore
-                    }
-                    | None => ()
-                }
-            }) -> ignore
-        } else {
-            // Js.log("Finished building the RescriptRepl.bs.js file and invoking callback")
-            f()
+// When the error is thrown pasting in multiple lines, is there a way to detect when the last line is being processed (in order to prevent attempting to build
+// at every iteration)?
+// let s = ref("")
+
+// let eval = async (codeStr, context, filename, callback) => {
+//    try {
+//         // This is largely just the handleRescriptCodeCase function, but I moved it in here due to not having made the multilineMode yet.
+//         // Probably will refactor this so that it's at least more testable...
+//         // if multilineModeState.contents["active"] {
+//         //     switch multilineModeState.contents["rescriptCodeInput"] {
+//         //         | Some(prevCodeStr) => {
+//         //             multilineModeState := {{ "active": true, "rescriptCodeInput": Some(prevCodeStr ++ "\n" ++ codeStr) }}
+//         //             callback((), "") // repl will hang if this isn't invoked, and ideally would like to invoke this with unit, but the type needs to be fixed to string within this scope.
+//         //         }
+//         //         | None => Js.log("INVARIANT VIOLATION: The RescriptCode case expects for there to be some rescriptCodeInput present.")
+//         //     }
+//         // } else {
+//         //     let rescriptStdout = await REPLLogic.handleBuildAndEval(codeStr, module(REPLLogic.FileOperations), module(REPLLogic.RescriptBuild), module(REPLLogic.EvalJavaScriptCode))
+//         //     switch rescriptStdout {
+//         //         | Some(s) => callback((), s)
+//         //         | _ => callback((), "")
+//         //     }
+//         // }
+//         // Js.log("codeStr in eval")
+//         // Js.log(codeStr)
+//         s := s.contents ++ "\n" ++ codeStr
+//         Js.log("s")
+//         Js.log(s)
+//    } catch {
+//         | e => {
+//             if (isRecoverableError(e)) {
+//                 Js.log("it's recoverable?")
+//                 // callback(new repl.Recoverable(e));
+//                 callback((), "")
+//             }
+//         }
+//    }
+// }
+
+let eval = async (codeStr, context, filename, callback) => {
+    // This is largely just the handleRescriptCodeCase function, but I moved it in here due to not having made the multilineMode yet.
+    // Probably will refactor this so that it's at least more testable...
+    if multilineModeState.contents["active"] {
+        switch multilineModeState.contents["rescriptCodeInput"] {
+            | Some(prevCodeStr) => {
+                multilineModeState := {{ "active": true, "rescriptCodeInput": Some(prevCodeStr ++ "\n" ++ codeStr) }}
+                callback((), "") // repl will hang if this isn't invoked, and ideally would like to invoke this with unit, but the type needs to be fixed to string within this scope.
+            }
+            | None => Js.log("INVARIANT VIOLATION: The RescriptCode case expects for there to be some rescriptCodeInput present.")
         }
+    } else {
+        let rescriptStdout = await REPLLogic.handleBuildAndEval(codeStr, module(REPLLogic.FileOperations), module(REPLLogic.RescriptBuild), module(REPLLogic.EvalJavaScriptCode))
+        switch rescriptStdout {
+            | Some(s) => callback((), s)
+            | _ => callback((), "")
+        }
+    }
+}
 
-        // if (stderr) {
-        //     // Js.log(`stderr: ${stderr}`);
-        //     Js.log("ERROR: " ++ stderr)
-        // }
-        // // Js.log(`stdout: ${stdout}`);
+// Need to parse the command string
+// to separate the types into the underlying Node type so it may be displayed the same way as
+// a Node repl displays evaluated javascript.
+// However, attempting to match on the empty string and provide unit, fixes the type variable 'a, such
+// that the invocation of the callback in the second case (with a string) results in a compilation error.
+// > let x = 100
+// ''
+// > Js.log(x + 200)
+// '300'
+// let eval = async (cmd, context, filename, callback) => {
+//     callback((), 100)
+// }
 
-        // Js.log("stderr: " ++ Buffer.toString(stderr))
-        
+let startMultiLineMode = replServer => () => {
+  multilineModeState := {{ "active": true, "rescriptCodeInput": Some("") }}
+  Repl.displayPrompt(replServer);
+}
+
+let endMultiLineMode = async (replServer) => {
+  let codeStr = multilineModeState.contents["rescriptCodeInput"]
+  let rescriptStdout = await REPLLogic.handleBuildAndEval(codeStr->Belt.Option.getUnsafe, module(REPLLogic.FileOperations), module(REPLLogic.RescriptBuild), module(REPLLogic.EvalJavaScriptCode))
+  multilineModeState := {{ "active": false, "rescriptCodeInput": None }}
+
+  switch rescriptStdout {
+        | Some(s) => Js.log(s)
+        | _ => Js.log("")
+    }
+
+  Repl.displayPrompt(replServer);
+}
+
+let loadModule = replServer => (moduleName) => {
+  REPLLogic.handleLoadModuleCase(moduleName, module(REPLLogic.FileOperations), module(REPLLogic.RescriptBuild), module(REPLLogic.EvalJavaScriptCode))->ignore
+  Repl.displayPrompt(replServer);
+}
+
+let reset = replServer => (module(FO: REPLLogic.FileOperations)) => () => {
+  FO.write(Filepath("./src/RescriptREPL.res"), "")
+  Repl.displayPrompt(replServer);
+}
+
+let run_repl = () => {
+    let replServer = start({ prompt: "> ", eval })
+    Repl.defineCommand(replServer, ":{", startMultiLineMode(replServer));
+    Repl.defineCommand(replServer, "}:", () => {
+        endMultiLineMode(replServer)->ignore
+    });
+    Repl.defineCommand(replServer, "load", loadModule(replServer));
+    Repl.defineCommand(replServer, "reset", reset(replServer, module(REPLLogic.FileOperations)));
+
+    Repl.on(replServer, "exit", () => {
+        Js.log("exiting")
+        try {
+            NodeJs.Fs.unlinkSync("./src/RescriptRepl.res")
+            NodeJs.Fs.unlinkSync("./src/RescriptRepl.bs.js")
+            NodeJs.Fs.unlinkSync("./src/evalJsCode.js")
+            ()
+        } catch {
+            | _ => ()
+        }
     })
 }
 
-// let build_rescript_code = (prev_contents, f) => {
-//     let _x = ChildProcess.execSync("npm run res:build")
-//     Js.log("Finished building the RescriptRepl.bs.js file and invoking callback")
-//     f()
-// }
+// For pasting code
+// https://nodejs.org/api/repl.html#recoverable-errors
 
-let eval_js_code = () => {
-    let contents = readFileSync("./src/RescriptRepl.bs.js", "utf8")
-    eval(contents)
-}
-
-// λ> let filepath = "./src/add/Add.res"
-// λ> Js.log(Js.String.split("/", filepath))
-// λ> [ '.', 'src', 'add', 'Add.res' ]
-// Js.log(Js.String.split("/", "/Add.res"))
-// λ> [ '', 'Add.res' ]
-let extract_module_name = (module_filepath) => {
-    let xs = Js.String.split("/", module_filepath)
-    let x = Js.String.split(".", xs[Belt.Array.length(xs) - 1])
-    switch x {
-        | [module_name, "res"] => Some(module_name)
-        | _ => {
-            Js.log("ERROR: expected a .res file, but received: " ++ Js.Array.joinWith(".", x))
-            None
-        }
-    }
-}
-
-let create_module_str = (module_name, module_contents) =>
-    "module " ++ module_name ++ " = { \n" ++ module_contents ++ "\n }"
-
-// optional string to indicate previous state of multiline code block
-let rec repl = (reset_contents) => {
-    prompt("\u03BB> ") -> Promise.then(user_input => {
-        // :load
-        // :reset
-        switch Js.String.split(" ", user_input) {
-            // | ["```"] => Js.Exn.raiseError("IMPLEMENT MULTI LINE CODE BLOCKS")
-            | [":exit"] => rl->Readline.Interface.close
-            | [":load", module_filepath] => {
-                // λ> :load ./src/add/Add.res
-                // module_filepath: ./src/add/Add.res
-
-                // Js.log("module_filepath: " ++ module_filepath)
-                // let [module_name, _] = Js.String.split(".", module_filepath)
-                switch extract_module_name(module_filepath) {
-                    | Some(module_name) => {
-                        try {
-                            let module_contents = readFileSync(module_filepath, "utf8")
-                            let module_str = create_module_str(module_name, module_contents)
-                            let (prev_contents, next_contents) = handle_get_next_contents(module_str)
-
-                            write("./src/RescriptRepl.res", next_contents) -> ignore
-                            build_rescript_code(prev_contents, eval_js_code) -> ignore
-                            repl(None)
-                        } catch {
-                            | Js.Exn.Error(obj) => {
-                                Js.log(obj)
-                                repl(None)
-                            }
-                        }
-                    }
-                    | None => repl(None)
-                }
-            }
-            | [":reset"] => {
-                rewrite("./src/RescriptRepl.res", "") -> ignore
-                repl(None)
-            }
-            | _ => {
-                let xs = Js.String.split("(", user_input)
-                let x = xs[0]
-                switch x {
-                    | "Js.log" => {
-                        switch reset_contents {
-                            | Some(pc) => rewrite("./src/RescriptRepl.res", pc) -> ignore
-                            | None => ()
-                        }
-
-                        let (prev_contents, next_contents) = handle_get_next_contents(user_input)
-                        write("./src/RescriptRepl.res", next_contents) -> ignore
-                        build_rescript_code(prev_contents, eval_js_code) -> ignore
-
-                        // rollback the previous version without the log statement
-                        // rewrite("./src/RescriptRepl.res", prev_contents) -> ignore
-                        // ^^ rewriting here causes a weird issue where it overwrites the file being built
-                        // so the log never happens, so I have to opt for passing the prev_contents as
-                        // the argument for the next repl loop
-                        repl(Some(prev_contents))
-                    }
-                    | _ => {
-                         switch reset_contents {
-                            | Some(pc) => rewrite("./src/RescriptRepl.res", pc) -> ignore
-                            | None => ()
-                        }
-
-                        let (prev_contents, next_contents) = handle_get_next_contents(user_input)
-                        write("./src/RescriptRepl.res", next_contents) -> ignore
-                        build_rescript_code(prev_contents, eval_js_code) -> ignore
-                        repl(None)
-                    }
-                }
-            }
-        }
-        
-        Promise.resolve(user_input)
-    }) -> ignore
-}
-
-// It works, but it would be ideal if the Js.log output didn't
-// appear on the same line as the next prompt. 
-
-// λ> let x = "Hello, "
-// λ> let y = "ReScript REPL"
-// λ> Js.log(x ++ y)
-// λ> Hello, ReScript REPL
-// See You Space Cowboy
-
-// λ> let x = 9001
-// λ> let y = 10
-// λ> Js.log(x + y)
-// λ> 9011
-
-// λ> let x = ":exit"
-// λ> let y = ":load Mod.res"
-// λ> Js.log(Js.String.split(" ", y))
-// λ> [ ':load', 'Mod.res' ]
-// λ> Js.log(Js.String.split(" ", x))
-// λ> [ ':load', 'Mod.res' ]
-// [ ':exit' ]
-
-// λ> :load Add.res
-// module_filepath: Add.res
-// λ> Js.log(Add.add(10, 12))
-// λ> 22
-
-// If the last line entered in the repl is Js.log...
-// then don't append it to the file, just create a temporary string
-// and eval it instead
-// λ> Js.log(Js.String.split("/", filepath))
-// λ> [Function (anonymous)]
-// [ '.', 'src', 'add', 'Add.res' ]
-// λ> Js.log(Js.String.split("/", "./src/Add.res"))
-// λ> [Function (anonymous)]
-// [ '.', 'src', 'add', 'Add.res' ]
-// [ '.', 'src', 'Add.res' ]
-// λ> Js.log(Js.String.split("/", "Add.res"))
-// λ> [Function (anonymous)]
-// [ '.', 'src', 'add', 'Add.res' ]
-// [ '.', 'src', 'Add.res' ]
-// [ 'Add.res' ]
-
-// Also, should have a similar behavior to Js.log (where the expr typed in is evaluated
-// and then removed from the file for the next repl loop)
-// That way you don't have to explicitly Js.log it.
-// For any lines that don't start with [ "let", "module", ?... ]
-// λ> Js.log(Js.Array.joinWith(".", ["Add", "rs"]))
-// λ> Add.rs
+// Node is saving to a file for the Repl as well
+// By default, the Node.js REPL will persist history between node REPL sessions by saving inputs to a .node_repl_history file located in the user's home directory.
+// This can be disabled by setting the environment variable NODE_REPL_HISTORY=''
+// https://nodejs.org/api/repl.html#environment-variable-options

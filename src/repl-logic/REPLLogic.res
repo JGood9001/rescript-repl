@@ -1,13 +1,15 @@
 open NodeJs
-open Parser
-open ParserCombinators
-open REPLCommands
-open DomainLogicAlg
+// open Parser
+// open ParserCombinators
+// open REPLCommands
+// open DomainLogicAlg
 
 @module("fs") external readFileSync: string => string => string = "readFileSync"
 @module("fs") external writeFileSync: string => string => () = "writeFileSync"
 external eval: string => () = "eval"
 
+type openModulesSectionSplit = { "openModulesSection": string, "remainingStr": string }
+@module("../utils/RegexUtils.bs.js") external separateOpenModulesFromRemainingCode: string => openModulesSectionSplit = "separateOpenModulesFromRemainingCode"
 
 type rescriptBuildResult = BuildSuccess | BuildFail
 
@@ -59,10 +61,15 @@ module type FileOperations = {
 }
 
 let isFilepath = (s: string): bool => {
-    switch Parser.runParser(rescriptJavascriptFileP, s) {
-        | Some(_) => true
-        | None => false
-    }
+    // switch Parser.runParser(rescriptJavascriptFileP, s) {
+    //     | Some(_) => true
+    //     | None => false
+    // }
+
+    let rescriptFileRegex = %re("/.res/g")
+    let jsFileRegex = %re("/.js/g")
+
+    (Js.Re.test_(rescriptFileRegex, s) || Js.Re.test_(jsFileRegex, s))
 }
 
 module FileOperations = {
@@ -91,7 +98,7 @@ module FileOperations = {
 type javaScriptCode = JavaScriptCode(string)
 
 module type EvalJavaScriptCode = {
-    let eval: javaScriptCode => module (FileOperations) => Promise.t<()>
+    let eval: javaScriptCode => module (FileOperations) => Promise.t<option<string>>
 }
 
 // NOTE:
@@ -111,14 +118,13 @@ let eval_js_code = (JavaScriptCode(code), module (FO: FileOperations)) => {
                             | Some(msg) => {
                                 Js.log("ERROR running JavaScript code: " ++ msg)
                                 Js.log("stdout: " ++ Buffer.toString(stdout))
-                                resolve(. ())
+                                resolve(. None)
                             }
-                            | None => resolve(. ())
+                            | None => resolve(. None)
                         }
                     }) -> ignore
                 } else {
-                    Js.log(stdout)
-                    resolve(. ())
+                    resolve(. Some(stdout->NodeJs.Buffer.toString->Js.String.trim))
                 }
             })->ignore
         } catch {
@@ -126,7 +132,7 @@ let eval_js_code = (JavaScriptCode(code), module (FO: FileOperations)) => {
                 Js.log("ERROR: Failed to evalutate the following JavaScript code: \n" ++ code)
                 Js.log("REASON: ")
                 Js.log(x)
-                resolve(. ())
+                resolve(. None)
             }
         }
     })
@@ -134,65 +140,6 @@ let eval_js_code = (JavaScriptCode(code), module (FO: FileOperations)) => {
 
 module EvalJavaScriptCode = {
     let eval = eval_js_code
-}
-
-// ---------------------------------------------------------------------
-
-//: Promise.t<cont_or_close<DomainLogicAlg.state<DomainLogicAlg.t>>> => {
-let handleContOrClose = (contOrClose, cont, close) => {
-    Promise.make((resolve, _reject) => {
-        switch contOrClose {
-            | Continue(s) => { // : DomainLogicAlg.state<DomainLogicAlg.t>
-                cont(s)->Promise.then(_ => Promise.make((res, _rej) => res(. ())))->ignore // the Promise.then becomes necessary because the recursive function is async... now
-                resolve(. contOrClose)
-            }
-            | Close => {
-                Js.log("See you Space Cowboy")
-                close()
-                resolve(. contOrClose)
-            }
-        }
-    })
-}
-
-let start_repl = async (make, prompt, close) => {
-    let state = make()
-
-    let rec run_loop = async (s) => {
-        let contOrClose = await prompt(s)
-        await handleContOrClose(contOrClose, run_loop, close)
-    }
-
-    await run_loop(state)
-}
-
-// NOTE:
-// An Alternative instance for option can be used here to prevent having to throw the error for the invariant violation case...
-// parseReplCommand(loadCommandP, s) <|> parseReplCommand(startMultiLineCommandP, s) <|> Parser.parseReplCommand(endMultiLineCommandP, s) <|> Some(RescriptCode(s))
-let parseReplCommand = s => {
-    let xs = [
-        Parser.runParser(loadCommandP, s),
-        Parser.runParser(startMultiLineCommandP, s),
-        Parser.runParser(endMultiLineCommandP, s),
-        Parser.runParser(resetCommandP, s)
-    ]
-    let ys = Js.Array.filter(x => Belt.Option.isSome(x), xs)
-
-    if Belt.Array.length(ys) == 0 {
-        REPLCommands.RescriptCode(s)
-    } else {
-        switch ys[0] {
-            | Some((_, x)) => x
-            | _ => Js.Exn.raiseError("INVARIANT VIOLATION: Impossible state, Nones were filtered out of the array prior to this section of the code")
-        }
-    }
-}
-
-let startsOrEndsWithJsLog = (s: string): bool => {
-    switch Parser.runParser(rescriptCodeStartsOrEndsWithJsLogP, s) {
-        | Some(_) => true
-        | None => false
-    }
 }
 
 // This pattern just kept popping up in this file
@@ -206,39 +153,36 @@ let then = (p: Promise.t<'a>, f: 'a => ()): Promise.t<()> => {
     })
 }
 
-let handleBuildAndEval = (code_str, module(FO : FileOperations), module(RB : RescriptBuild), module(EvalJS : EvalJavaScriptCode)) => {
+let handleBuildAndEval = async (codeStr, module(FO : FileOperations), module(RB : RescriptBuild), module(EvalJS : EvalJavaScriptCode)) => {
     let prevContents = FO.read(Filepath("./src/RescriptREPL.res"))
-    FO.write(Filepath("./src/RescriptREPL.res"), prevContents ++ "\n" ++ code_str)
-    RB.build()
-    -> Promise.then(result => {
-        Promise.make((resolve, _reject) => {
-            switch result {
-                | BuildFail => {
-                    // Rolling back the contents of RescriptREPL.res to the previous contents
-                    FO.write(Filepath("./src/RescriptREPL.res"), prevContents)
-                    resolve(. ())
-                }
-                | BuildSuccess => {
-                    let jsCodeStr = FO.read(Filepath("./src/RescriptREPL.bs.js"))
-                    // Changed EvalJS.eval to return a promise, as if you don't wait for the stdout to be printed, then this will prevent the prompt icon
-                    // from being displayed.
-                    EvalJS.eval(JavaScriptCode(jsCodeStr), module(FO))
-                    ->then(_ => {
-                        if startsOrEndsWithJsLog(code_str) {
-                            FO.write(Filepath("./src/RescriptREPL.res"), prevContents)
-                        }
-                        resolve(. ())
-                    })->ignore
-                }
+    FO.write(Filepath("./src/RescriptREPL.res"), prevContents ++ "\n" ++ codeStr)
+    let result = await RB.build()
+    
+    switch result {
+        | BuildFail => {
+            // Rolling back the contents of RescriptREPL.res to the previous contents
+            FO.write(Filepath("./src/RescriptREPL.res"), prevContents)
+            None
+        }
+        | BuildSuccess => {
+            let jsCodeStr = FO.read(Filepath("./src/RescriptREPL.bs.js"))
+            // Changed EvalJS.eval to return a promise, as if you don't wait for the stdout to be printed, then this will prevent the prompt icon from being displayed.
+            let stdout = await EvalJS.eval(JavaScriptCode(jsCodeStr), module(FO))
+            let startsWithJsLogRegex = %re("/^Js.log/g")
+            let endsWithJsLogRegex = %re("/->(\x20*)Js.log(.*)/g")
+
+            if (Js.Re.test_(startsWithJsLogRegex, codeStr) || Js.Re.test_(endsWithJsLogRegex, codeStr)) {
+                FO.write(Filepath("./src/RescriptREPL.res"), prevContents)
             }
-        })
-    }) // ->ignore
+            stdout
+        }
+    }
 }
 
-let handleLoadModuleBuildAndEval = (code_str, module(FO : FileOperations), module(RB : RescriptBuild), module(EvalJS : EvalJavaScriptCode)) => {
+let handleLoadModuleBuildAndEval = (codeStr, module(FO : FileOperations), module(RB : RescriptBuild), module(EvalJS : EvalJavaScriptCode)) => {
     let prevContents = FO.read(Filepath("./src/RescriptREPL.res"))
     // The only difference is in this line... so just make a single function which takes a HoF
-    FO.write(Filepath("./src/RescriptREPL.res"), code_str)
+    FO.write(Filepath("./src/RescriptREPL.res"), codeStr)
     RB.build()
     -> Promise.then(result => {
         Promise.make((resolve, _reject) => {
@@ -254,7 +198,10 @@ let handleLoadModuleBuildAndEval = (code_str, module(FO : FileOperations), modul
                     // from being displayed.
                     EvalJS.eval(JavaScriptCode(jsCodeStr), module(FO))
                     ->then(_ => {
-                        if startsOrEndsWithJsLog(code_str) {
+                        let startsWithJsLogRegex = %re("/^Js.log/g")
+                        let endsWithJsLogRegex = %re("/->(\x20*)Js.log(.*)/g")
+
+                        if (Js.Re.test_(startsWithJsLogRegex, codeStr) || Js.Re.test_(endsWithJsLogRegex, codeStr)) {
                             FO.write(Filepath("./src/RescriptREPL.res"), prevContents)
                         }
                         resolve(. ())
@@ -265,85 +212,112 @@ let handleLoadModuleBuildAndEval = (code_str, module(FO : FileOperations), modul
     }) // ->ignore
 }
 
-let handleEndMultiLineCase = (state: domainLogicState, module (FO: FileOperations), module (RB: RescriptBuild), module (EvalJS: EvalJavaScriptCode)): Promise.t<domainLogicState> => {
-    switch state.multilineMode.rescriptCodeInput {
-        | Some(codeStr) => {
-            handleBuildAndEval(codeStr, module(FO), module(RB), module(EvalJS))
-            -> Promise.then(_result => {
-                let updatedState = { multilineMode: { active: false, rescriptCodeInput: None }}
-                Promise.make((resolve, _reject) => resolve(. updatedState))
-            })
-        }
-        | None => Js.Exn.raiseError("INVARIANT VIOLATION: The EndMultiLineMode case expects for there to be some rescriptCodeInput present.")
-    }
-}
+// let handleEndMultiLineCase = (state: domainLogicState, module (FO: FileOperations), module (RB: RescriptBuild), module (EvalJS: EvalJavaScriptCode)): Promise.t<domainLogicState> => {
+//     switch state.multilineMode.rescriptCodeInput {
+//         | Some(codeStr) => {
+//             handleBuildAndEval(codeStr, module(FO), module(RB), module(EvalJS))
+//             -> Promise.then(_result => {
+//                 let updatedState = { multilineMode: { active: false, rescriptCodeInput: None }}
+//                 Promise.make((resolve, _reject) => resolve(. updatedState))
+//             })
+//         }
+//         | None => Js.Exn.raiseError("INVARIANT VIOLATION: The EndMultiLineMode case expects for there to be some rescriptCodeInput present.")
+//     }
+// }
 
-let handleRescriptCodeCase = (state: domainLogicState, nextCodeStr: string, module(FO : FileOperations), module(RB : RescriptBuild), module(EvalJS : EvalJavaScriptCode)): Promise.t<domainLogicState> => {
-    Promise.make((resolve, _reject) => {
-        if state.multilineMode.active {
-            switch state.multilineMode.rescriptCodeInput {
-                | Some(prevCodeStr) => {
-                    let updated_state = { multilineMode: { active: true, rescriptCodeInput: Some(prevCodeStr ++ "\n" ++ nextCodeStr) }}
-                    resolve(. updated_state)
-                }
-                | None => Js.log("INVARIANT VIOLATION: The RescriptCode case expects for there to be some rescriptCodeInput present.")
-            }
-        } else {
-            // Without the Promise.then, when a user is entering multiple lines of code in quick succession (+ where some lines contain errors)
-            // will cause the rollback to restore potentially invalid code.
-            handleBuildAndEval(nextCodeStr, module(FO), module(RB), module(EvalJS))
-            ->then(_ => resolve(. state))->ignore
-        }
-    })
-}
+// let handleRescriptCodeCase = (state: domainLogicState, nextCodeStr: string, module(FO : FileOperations), module(RB : RescriptBuild), module(EvalJS : EvalJavaScriptCode)): Promise.t<domainLogicState> => {
+//     Promise.make((resolve, _reject) => {
+//         if state.multilineMode.active {
+//             switch state.multilineMode.rescriptCodeInput {
+//                 | Some(prevCodeStr) => {
+//                     let updated_state = { multilineMode: { active: true, rescriptCodeInput: Some(prevCodeStr ++ "\n" ++ nextCodeStr) }}
+//                     resolve(. updated_state)
+//                 }
+//                 | None => Js.log("INVARIANT VIOLATION: The RescriptCode case expects for there to be some rescriptCodeInput present.")
+//             }
+//         } else {
+//             // Without the Promise.then, when a user is entering multiple lines of code in quick succession (+ where some lines contain errors)
+//             // will cause the rollback to restore potentially invalid code.
+//             handleBuildAndEval(nextCodeStr, module(FO), module(RB), module(EvalJS))
+//             ->then(_ => resolve(. state))->ignore
+//         }
+//     })
+// }
 
+// Replacing the parser combinator with regex
+// https://rescript-lang.org/docs/manual/latest/api/js/re#lastindex
+
+// Have only been able to get it to match a single line, so I'll just have to use a loop and slice the string (immutable)
+// to retrieve the open module section.
+// > let re = %re("/(^open(\x20*)[^A-Z][A-Za-z0-9]*\n)/g")
+// ''
+// > Js.log(Js.Re.exec_(re, "open ModuleName"))
+// "[ 'open', index: 0, input: 'open ModuleName', groups: undefined ]"
+// > Js.Re.exec_(re, "open ModuleName")->ignore->(() => Js.log(Js.Re.lastIndex(re)))
+// '4'
+
+// Now if I can just match multiple lines which start with open and end with a newline
+// then I can get the index where I need to split at for the (openModuleSection, remainingCodeStr)
+
+// This compiles to JS, but the evaluation of the resulting code results in an error...
+// > let re = %re("/(^open(\x20*)[^A-Z][A-Za-z0-9]*\n)/")
+// ERROR running JavaScript code: Command failed: node ./src/evalJsCode.js
+// undefined:5
+// var re = /(^open( *)[^A-Z][A-Za-z0-9]*
+//          ^
+
+// SyntaxError: Invalid regular expression: missing /
+
+// The javascript it generates:
+// var re = /(^open(\x20*)[^A-Z][A-Za-z0-9]*\n)/;
+
+// which works fine when I run it in a node repl
+// > var re = /(^open(\x20*)[^A-Z][A-Za-z0-9]*\n)/;
+// > re.test("open ModuleName\n")
+// true
 let handleLoadModuleCase = (moduleName: string, module (FO: FileOperations), module (RB: RescriptBuild), module (EvalJS: EvalJavaScriptCode)): Promise.t<()> => {
     let codeStr = FO.read(Filepath("./src/RescriptREPL.res"))
-    switch Parser.runParser(openModuleSectionP, codeStr) {
-        | Some((remainingCodeStr, OpenModuleSection(openModuleSectionStr))) => {
-            let nextCodeStr = openModuleSectionStr ++ `open ${moduleName}` ++ remainingCodeStr
+    let x = separateOpenModulesFromRemainingCode(codeStr)
 
-            handleLoadModuleBuildAndEval(nextCodeStr, module(FO), module(RB), module(EvalJS))
-            -> Promise.then(_result => {
-                Promise.make((resolve, _reject) => resolve(. ()))
-            })
-        }
-        | None => {
-            // There are currently no 'open Module' declarations beneath the // Module Imports comment, so kick it off here
-            let nextCodeStr = `open ${moduleName}` ++ "\n" ++ codeStr
+    if Js.String.length(x["openModulesSection"]) > 0 {
+        let xs = [x["openModulesSection"], `open ${moduleName}`]
+        let nextCodeStr = Js.Array.joinWith("\n", xs) ++ "\n" ++ x["remainingStr"]
+        
+        handleLoadModuleBuildAndEval(nextCodeStr, module(FO), module(RB), module(EvalJS))
+        -> Promise.then(_result => {
+            Promise.make((resolve, _reject) => resolve(. ()))
+        })
+    } else {
+        let nextCodeStr = `open ${moduleName}` ++ "\n" ++ codeStr
 
-            handleLoadModuleBuildAndEval(nextCodeStr, module(FO), module(RB), module(EvalJS))
-            -> Promise.then(_result => {
-                Promise.make((resolve, _reject) => resolve(. ()))
-            })
-        }
+        handleLoadModuleBuildAndEval(nextCodeStr, module(FO), module(RB), module(EvalJS))
+        -> Promise.then(_result => {
+            Promise.make((resolve, _reject) => resolve(. ()))
+        })
     }
 }
 
-// I also had a :reset command in the first version which would wipe the file clean...
-let parseAndHandleCommands = (state: domainLogicState, s: string, module(FO : FileOperations), module(RB : RescriptBuild), module(EvalJS : EvalJavaScriptCode)) => {
-    Promise.make((resolve, _reject) => {
-        switch parseReplCommand(s) {
-            | StartMultiLineMode => {
-                let updatedState = { multilineMode: { active: true, rescriptCodeInput: Some("") }}
-                resolve(. DomainLogicAlg.Continue(updatedState))
-            }
-            | EndMultiLineMode => {
-                handleEndMultiLineCase(state, module(FO), module(RB), module(EvalJS))
-                ->then(updatedState => resolve(. DomainLogicAlg.Continue(updatedState)))->ignore
-            }
-            | LoadModule(moduleName) => {
-                handleLoadModuleCase(moduleName, module(FO), module(RB), module(EvalJS))
-                ->then(_ => resolve(. DomainLogicAlg.Continue(state)))->ignore
-            }
-            | RescriptCode(nextCodeStr) => {
-                handleRescriptCodeCase(state, nextCodeStr, module(FO), module(RB), module(EvalJS))
-                ->then(nextState => resolve(. DomainLogicAlg.Continue(nextState)))->ignore
-            }
-            | Reset => {
-                FO.write(Filepath("./src/RescriptREPL.res"), "")
-                resolve(. DomainLogicAlg.Continue(state))
-            }
-        }
-    })
-}
+// Coupled with the regex error earlier, this one is also mystifying
+// > Js.Array.joinWith("\n", xs)->Js.log
+// ERROR running JavaScript code: Command failed: node ./src/evalJsCode.js
+// undefined:12
+// console.log(Js_array.joinWith("
+//                               ^
+
+// SyntaxError: Invalid or unexpected token
+//     at Object.<anonymous> (C:\Users\jgood\Desktop\dev\rescript-repl\src\evalJsCode.js:1:1)
+//     at Module._compile (node:internal/modules/cjs/loader:1254:14)
+//     at Module._extensions..js (node:internal/modules/cjs/loader:1308:10)
+//     at Module.load (node:internal/modules/cjs/loader:1117:32)
+//     at Module._load (node:internal/modules/cjs/loader:958:12)
+//     at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:81:12)
+//     at node:internal/main/run_main_module:23:47
+
+// Node.js v18.14.2
+
+// stdout: 
+// ''
+
+// And again, the generated javascript is correct  (checked against rescript playground)
+// var xs = ["1", "2","3"];
+// console.log(Js_array.joinWith("\n", xs));

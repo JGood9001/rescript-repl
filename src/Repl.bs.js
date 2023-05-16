@@ -3,200 +3,141 @@
 
 var Fs = require("fs");
 var Curry = require("rescript/lib/js/curry.js");
-var Js_exn = require("rescript/lib/js/js_exn.js");
-var Process = require("process");
-var Js_array = require("rescript/lib/js/js_array.js");
-var Readline = require("readline");
-var Js_string = require("rescript/lib/js/js_string.js");
-var Caml_array = require("rescript/lib/js/caml_array.js");
-var Child_process = require("child_process");
-var Js_null_undefined = require("rescript/lib/js/js_null_undefined.js");
+var REPLLogic = require("./repl-logic/REPLLogic.bs.js");
+var Noderepl = require("node:repl");
 var Caml_js_exceptions = require("rescript/lib/js/caml_js_exceptions.js");
 
-var rl = Readline.createInterface({
-      input: Process.stdin,
-      output: Process.stdout
-    });
+var Repl = {};
 
-rl.on("close", (function (param) {
-        console.log("See You Space Cowboy");
-        Fs.unlinkSync("./src/RescriptRepl.res");
-        Fs.unlinkSync("./src/RescriptRepl.bs.js");
-      }));
+var multilineModeState = {
+  contents: {
+    active: false,
+    rescriptCodeInput: undefined
+  }
+};
 
-function prompt(query) {
-  return new Promise((function (resolve, _reject) {
-                rl.question(query, (function (x) {
-                        resolve(x);
-                      }));
-              }));
+function isRecoverableError(error) {
+  if (error.name !== "SyntaxError") {
+    return false;
+  }
+  var re = /^(Unexpected end of input|Unexpected token)/g;
+  return re.test(error.message);
 }
 
-function write(filename, contents) {
-  Fs.writeFileSync(filename, contents);
+function f(param) {
+  console.log("line 1");
+  console.log("line 2");
 }
 
-function rewrite(filename, contents) {
-  Fs.unlinkSync(filename);
-  Fs.writeFileSync(filename, contents);
-}
+var s = {
+  contents: ""
+};
 
-function handle_get_next_contents(s) {
+async function $$eval(codeStr, context, filename, callback) {
   try {
-    var contents = Fs.readFileSync("./src/RescriptRepl.res", "utf8");
-    return [
-            contents,
-            contents + "\n" + s
-          ];
+    s.contents = s.contents + "\n" + codeStr;
+    console.log("s");
+    console.log(s);
+    return ;
   }
-  catch (raw__obj){
-    var _obj = Caml_js_exceptions.internalToOCamlException(raw__obj);
-    if (_obj.RE_EXN_ID === Js_exn.$$Error) {
-      return [
-              "",
-              s
-            ];
+  catch (raw_e){
+    var e = Caml_js_exceptions.internalToOCamlException(raw_e);
+    if (isRecoverableError(e)) {
+      console.log("it's recoverable?");
+      return Curry._2(callback, undefined, "");
+    } else {
+      return ;
     }
-    throw _obj;
   }
 }
 
-function build_rescript_code(prev_contents, f) {
-  return Child_process.exec("npm run res:build", (function (error, stdout, stderr) {
-                if (error == null) {
-                  return Curry._1(f, undefined);
-                } else {
-                  Js_null_undefined.bind(error, (function (error_str) {
-                          var msg = error_str.message;
-                          if (msg !== undefined) {
-                            console.log("ERROR: " + msg);
-                            console.log("stdout: " + stdout.toString());
-                            Fs.writeFileSync("./src/RescriptRepl.res", prev_contents);
-                            return ;
-                          }
-                          
-                        }));
-                  return ;
-                }
-              }));
+function startMultiLineMode(replServer, param) {
+  multilineModeState.contents = {
+    active: true,
+    rescriptCodeInput: ""
+  };
+  replServer.displayPrompt();
 }
 
-function eval_js_code(param) {
-  var contents = Fs.readFileSync("./src/RescriptRepl.bs.js", "utf8");
-  eval(contents);
-}
-
-function extract_module_name(module_filepath) {
-  var xs = Js_string.split("/", module_filepath);
-  var x = Js_string.split(".", Caml_array.get(xs, xs.length - 1 | 0));
-  if (x.length === 2) {
-    var module_name = x[0];
-    var match = x[1];
-    if (match === "res") {
-      return module_name;
-    }
-    
+async function endMultiLineMode(replServer) {
+  var codeStr = multilineModeState.contents.rescriptCodeInput;
+  var rescriptStdout = await REPLLogic.handleBuildAndEval(codeStr, {
+        read: REPLLogic.FileOperations.read,
+        write: REPLLogic.FileOperations.write
+      }, REPLLogic.RescriptBuild, REPLLogic.EvalJavaScriptCode);
+  multilineModeState.contents = {
+    active: false,
+    rescriptCodeInput: undefined
+  };
+  if (rescriptStdout !== undefined) {
+    console.log(rescriptStdout);
+  } else {
+    console.log("");
   }
-  console.log("ERROR: expected a .res file, but received: " + Js_array.joinWith(".", x));
+  replServer.displayPrompt();
 }
 
-function create_module_str(module_name, module_contents) {
-  return "module " + module_name + " = { \n" + module_contents + "\n }";
+function loadModule(replServer, moduleName) {
+  REPLLogic.handleLoadModuleCase(moduleName, {
+        read: REPLLogic.FileOperations.read,
+        write: REPLLogic.FileOperations.write
+      }, REPLLogic.RescriptBuild, REPLLogic.EvalJavaScriptCode);
+  replServer.displayPrompt();
 }
 
-function repl(reset_contents) {
-  prompt("\u03BB> ").then(function (user_input) {
-        var match = Js_string.split(" ", user_input);
-        var exit = 0;
-        var len = match.length;
-        if (len >= 3) {
-          exit = 1;
-        } else {
-          switch (len) {
-            case 0 :
-                exit = 1;
-                break;
-            case 1 :
-                var match$1 = match[0];
-                switch (match$1) {
-                  case ":exit" :
-                      rl.close();
-                      break;
-                  case ":reset" :
-                      rewrite("./src/RescriptRepl.res", "");
-                      repl(undefined);
-                      break;
-                  default:
-                    exit = 1;
-                }
-                break;
-            case 2 :
-                var match$2 = match[0];
-                if (match$2 === ":load") {
-                  var module_filepath = match[1];
-                  var module_name = extract_module_name(module_filepath);
-                  if (module_name !== undefined) {
-                    try {
-                      var module_contents = Fs.readFileSync(module_filepath, "utf8");
-                      var module_str = create_module_str(module_name, module_contents);
-                      var match$3 = handle_get_next_contents(module_str);
-                      Fs.writeFileSync("./src/RescriptRepl.res", match$3[1]);
-                      build_rescript_code(match$3[0], eval_js_code);
-                      repl(undefined);
-                    }
-                    catch (raw_obj){
-                      var obj = Caml_js_exceptions.internalToOCamlException(raw_obj);
-                      if (obj.RE_EXN_ID === Js_exn.$$Error) {
-                        console.log(obj._1);
-                        repl(undefined);
-                      } else {
-                        throw obj;
-                      }
-                    }
-                  } else {
-                    repl(undefined);
-                  }
-                } else {
-                  exit = 1;
-                }
-                break;
-            
-          }
-        }
-        if (exit === 1) {
-          var xs = Js_string.split("(", user_input);
-          var x = Caml_array.get(xs, 0);
-          if (x === "Js.log") {
-            if (reset_contents !== undefined) {
-              rewrite("./src/RescriptRepl.res", reset_contents);
-            }
-            var match$4 = handle_get_next_contents(user_input);
-            var prev_contents = match$4[0];
-            Fs.writeFileSync("./src/RescriptRepl.res", match$4[1]);
-            build_rescript_code(prev_contents, eval_js_code);
-            repl(prev_contents);
-          } else {
-            if (reset_contents !== undefined) {
-              rewrite("./src/RescriptRepl.res", reset_contents);
-            }
-            var match$5 = handle_get_next_contents(user_input);
-            Fs.writeFileSync("./src/RescriptRepl.res", match$5[1]);
-            build_rescript_code(match$5[0], eval_js_code);
-            repl(undefined);
-          }
-        }
-        return Promise.resolve(user_input);
+function reset(replServer, FO, param) {
+  Curry._2(FO.write, /* Filepath */{
+        _0: "./src/RescriptREPL.res"
+      }, "");
+  replServer.displayPrompt();
+}
+
+function run_repl(param) {
+  var replServer = Noderepl.start({
+        prompt: "> ",
+        eval: $$eval
       });
+  replServer.defineCommand(":{", (function (param) {
+          return startMultiLineMode(replServer, param);
+        }));
+  replServer.defineCommand("}:", (function (param) {
+          endMultiLineMode(replServer);
+        }));
+  replServer.defineCommand("load", (function (param) {
+          return loadModule(replServer, param);
+        }));
+  var partial_arg_read = REPLLogic.FileOperations.read;
+  var partial_arg_write = REPLLogic.FileOperations.write;
+  var partial_arg = {
+    read: partial_arg_read,
+    write: partial_arg_write
+  };
+  replServer.defineCommand("reset", (function (param) {
+          return reset(replServer, partial_arg, param);
+        }));
+  replServer.on("exit", (function (param) {
+          console.log("exiting");
+          try {
+            Fs.unlinkSync("./src/RescriptRepl.res");
+            Fs.unlinkSync("./src/RescriptRepl.bs.js");
+            Fs.unlinkSync("./src/evalJsCode.js");
+            return ;
+          }
+          catch (exn){
+            return ;
+          }
+        }));
 }
 
-exports.rl = rl;
-exports.prompt = prompt;
-exports.write = write;
-exports.rewrite = rewrite;
-exports.handle_get_next_contents = handle_get_next_contents;
-exports.build_rescript_code = build_rescript_code;
-exports.eval_js_code = eval_js_code;
-exports.extract_module_name = extract_module_name;
-exports.create_module_str = create_module_str;
-exports.repl = repl;
-/* rl Not a pure module */
+exports.Repl = Repl;
+exports.multilineModeState = multilineModeState;
+exports.isRecoverableError = isRecoverableError;
+exports.f = f;
+exports.s = s;
+exports.$$eval = $$eval;
+exports.startMultiLineMode = startMultiLineMode;
+exports.endMultiLineMode = endMultiLineMode;
+exports.loadModule = loadModule;
+exports.reset = reset;
+exports.run_repl = run_repl;
+/* fs Not a pure module */
