@@ -222,7 +222,7 @@ let run_repl = () => {
     Js.log("Welcome to ReScript REPL\n")
     Js.log("Available Commands:")
     Js.log(".load   - Load a Module into the current REPL context")
-    Js.log(".reset  - Start Mutliline Mode")
+    Js.log(".reset  - To clear ReScript code saved in the current REPL context")
     Js.log(".{:     - Start Mutliline Mode")
     Js.log(".}:     - End Mutliline Mode")
 
