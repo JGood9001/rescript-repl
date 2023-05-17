@@ -208,6 +208,12 @@ let endMultiLineMode = async (replServer) => {
   Repl.displayPrompt(replServer);
 }
 
+// This was deleted while merging to main branch?
+let startMultiLineMode = replServer => () => {
+    multilineModeState := {{ "active": true, "rescriptCodeInput": Some("") }}
+    Repl.displayPrompt(replServer)
+}
+
 let loadModule = replServer => (moduleName) => {
   REPLLogic.handleLoadModuleCase(moduleName, module(REPLLogic.FileOperations), module(REPLLogic.RescriptBuild), module(REPLLogic.EvalJavaScriptCode))->ignore
   Repl.displayPrompt(replServer);
@@ -227,7 +233,7 @@ let run_repl = () => {
     Js.log(".}:     - End Mutliline Mode")
 
     let replServer = start({ prompt: "> ", eval })
-    Repl.defineCommand(replServer, ":{", REPLLogic.startMultiLineMode(replServer));
+    Repl.defineCommand(replServer, ":{", startMultiLineMode(replServer));
     Repl.defineCommand(replServer, "}:", () => {
         endMultiLineMode(replServer)->ignore
     });

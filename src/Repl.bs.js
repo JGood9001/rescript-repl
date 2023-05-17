@@ -89,14 +89,6 @@ async function $$eval(codeStr, context, filename, callback) {
   }
 }
 
-function startMultiLineMode(replServer, param) {
-  multilineModeState.contents = {
-    active: true,
-    rescriptCodeInput: ""
-  };
-  replServer.displayPrompt();
-}
-
 async function endMultiLineMode(replServer) {
   var codeStr = multilineModeState.contents.rescriptCodeInput;
   var rescriptStdout = await REPLLogic.handleBuildAndEval(codeStr, {
@@ -112,6 +104,14 @@ async function endMultiLineMode(replServer) {
   } else {
     console.log("");
   }
+  replServer.displayPrompt();
+}
+
+function startMultiLineMode(replServer, param) {
+  multilineModeState.contents = {
+    active: true,
+    rescriptCodeInput: ""
+  };
   replServer.displayPrompt();
 }
 
@@ -134,7 +134,7 @@ function run_repl(param) {
   console.log("Welcome to ReScript REPL\n");
   console.log("Available Commands:");
   console.log(".load   - Load a Module into the current REPL context");
-  console.log(".reset  - Start Mutliline Mode");
+  console.log(".reset  - To clear ReScript code saved in the current REPL context");
   console.log(".{:     - Start Mutliline Mode");
   console.log(".}:     - End Mutliline Mode");
   var replServer = Noderepl.start({
@@ -179,8 +179,8 @@ exports.isRecoverableError = isRecoverableError;
 exports.convertToJSONString = convertToJSONString;
 exports.handleDirtyWork = handleDirtyWork;
 exports.$$eval = $$eval;
-exports.startMultiLineMode = startMultiLineMode;
 exports.endMultiLineMode = endMultiLineMode;
+exports.startMultiLineMode = startMultiLineMode;
 exports.loadModule = loadModule;
 exports.reset = reset;
 exports.run_repl = run_repl;
