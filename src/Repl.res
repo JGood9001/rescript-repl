@@ -227,7 +227,7 @@ let run_repl = () => {
     Js.log(".}:     - End Mutliline Mode")
 
     let replServer = start({ prompt: "> ", eval })
-    Repl.defineCommand(replServer, ":{", startMultiLineMode(replServer));
+    Repl.defineCommand(replServer, ":{", REPLLogic.startMultiLineMode(replServer));
     Repl.defineCommand(replServer, "}:", () => {
         endMultiLineMode(replServer)->ignore
     });
