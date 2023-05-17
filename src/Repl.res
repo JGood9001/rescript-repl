@@ -40,10 +40,10 @@ let isRecoverableError = error => {
 //     Js.log("line 2")
 // }
 
-// When the error is thrown pasting in multiple lines, is there a way to detect when the last line is being processed (in order to prevent attempting to build
-// at every iteration)?
 // let s = ref("")
 
+// There's no state on the context which would indicate what current line of a multiline pasted input is currently
+// being processed. 
 // let eval = async (codeStr, context, filename, callback) => {
 //    try {
 //         // This is largely just the handleRescriptCodeCase function, but I moved it in here due to not having made the multilineMode yet.
@@ -79,6 +79,92 @@ let isRecoverableError = error => {
 //    }
 // }
 
+// let x = "{\n'first':'John',\n'last':'Jingleheimer',\n'address':{'street':'STREET','zip':85923}\n}"
+// let y = x.split(" ").map(s => re.test(s) ? `'${s.split(":")[0]}':` : s)
+// y => ["{\n'first':'John',\n'last':'Jingleheimer',\n'address':{'street':'STREET','zip':85923}\n}"]
+// let z = y.map(s => s.split("\n"))
+// z => ['{', "'first':'John',", "'last':'Jingleheimer',", "'address':{'street':'STREET','zip':85923}", '}']
+// let transformed = Array.prototype.concat(...z).join("")
+// transformed => "{'first':'John','last':'Jingleheimer','address':{'street':'STREET','zip':85923}}"
+// transformed.replaceAll("'", "\"") => '{"first":"John","last":"Jingleheimer","address":{"street":"STREET","zip":85923}}'
+
+// JSON.parse(transformed.replaceAll("'", "\""))
+// {first: 'John', last: 'Jingleheimer', address: {…}}
+
+// input:
+// "{\n  first: 'John',\n  last: 'Jingleheimer',\n  address: { street: 'STREET', zip: 85923 }\n}"
+// output:
+// {first: 'John', last: 'Jingleheimer', address: {…}}
+// address:  {street: 'STREET', zip: 85923}
+// first: "John"
+// last: "Jingleheimer"
+// let convertToJSONString = rescriptStdoutStr => {
+//   const re = /[a-z]*:/g
+//   let y = rescriptStdoutStr.split(" ").map(s => re.test(s) ? `'${s.split(":")[0]}':` : s)
+//   // let xs = rescriptStdoutStr.split(" ").map(s => re.test(s) ? `'${s.split(":")[0]}':` : s).map(s => s.split("\n"))
+//   let z = y.map(s => s.split("\n"))
+//   let transformed = Array.prototype.concat(...z).join("")
+//   return JSON.parse(transformed.replaceAll("'", "\""))
+// }
+
+let convertToJSONString = %raw(`
+    function(rescriptStdoutStr) {
+        const re = /[a-z]*:/g
+        let y = rescriptStdoutStr.split(" ").map(s => re.test(s) ? ["\"", s.split(":")[0], "\"", ":"].join("") : s)
+        let z = y.map(s => s.split("\n"))
+        let transformed = Array.prototype.concat(...z).join("")
+        return JSON.parse(transformed.replaceAll("'", "\"").replaceAll("undefined", "\"None\""))
+    }
+`)
+
+// PS C:rescript-repl> resrepl
+// > type address = { "street": string, "zip": int }
+// ''
+// > type person = { "first": string, "last": string, "address": address }
+// ''
+// > let p = { "first": "John", "last": "Jingleheimer", "address": { "street": "STREET", "zip": 85923 } }
+// Js.log''
+// > Js.log(Some(p))
+// {
+//   first: 'John',
+//   last: 'Jingleheimer',
+//   address: { street: 'STREET', zip: 85923 }
+// }
+let handleDirtyWork = %raw(`
+  function(callback, value) {
+    if (value !== "") {
+        try {
+            callback(null, JSON.parse(value))
+        } catch {
+            // Okay... so objects are ending up here as such:
+            // '{\n' +
+            //     "  first: 'John',\n" +
+            //     "  last: 'Jingleheimer',\n" +
+            //     "  address: { street: 'STREET', zip: 85923 }\n" +
+            //     '}'
+            // But you want to have it in the format of a json string, so that
+            // the results displayed at the REPL are just as Node repl would display it.
+            // Need to wrap all series of characters which precede ":" in single quotes
+            // to accomplish this.
+
+            // Create a Regex which gets any series of characters A-Z/a-z not
+            // surrounded by single quotes.
+
+
+            try {
+                // This this fails to parse stdout result of None
+                callback(null, convertToJSONString(value))
+            }  catch {
+                console.log(value)
+                callback(null, "couldnt parse None")
+            }
+        }
+    } else {
+        callback(null, value)
+    }
+  }
+`)
+
 let eval = async (codeStr, context, filename, callback) => {
     // This is largely just the handleRescriptCodeCase function, but I moved it in here due to not having made the multilineMode yet.
     // Probably will refactor this so that it's at least more testable...
@@ -93,28 +179,20 @@ let eval = async (codeStr, context, filename, callback) => {
     } else {
         let rescriptStdout = await REPLLogic.handleBuildAndEval(codeStr, module(REPLLogic.FileOperations), module(REPLLogic.RescriptBuild), module(REPLLogic.EvalJavaScriptCode))
         switch rescriptStdout {
-            | Some(s) => callback((), s)
-            | _ => callback((), "")
+            // Attempting to invoke the callback in these branches with two different types results in a compilation error,
+            // which is why we use Javascript to circumvent that.
+            // This is necessary so that the result logged via Rescript's stdout after build and eval
+            // will be displayed in the repl just the same as Node's REPL output for JS.
+            // So instead of this:
+            // > Js.log(x + 200)
+            // '300'
+            // We get this (for any arbitrary value provided from stdout):
+            // > Js.log(x + 200)
+            // 300
+            | Some(s) => handleDirtyWork(callback, s) // callback((), s)
+            | _ => handleDirtyWork(callback, "") // callback((), "")
         }
     }
-}
-
-// Need to parse the command string
-// to separate the types into the underlying Node type so it may be displayed the same way as
-// a Node repl displays evaluated javascript.
-// However, attempting to match on the empty string and provide unit, fixes the type variable 'a, such
-// that the invocation of the callback in the second case (with a string) results in a compilation error.
-// > let x = 100
-// ''
-// > Js.log(x + 200)
-// '300'
-// let eval = async (cmd, context, filename, callback) => {
-//     callback((), 100)
-// }
-
-let startMultiLineMode = replServer => () => {
-  multilineModeState := {{ "active": true, "rescriptCodeInput": Some("") }}
-  Repl.displayPrompt(replServer);
 }
 
 let endMultiLineMode = async (replServer) => {
@@ -141,6 +219,13 @@ let reset = replServer => (module(FO: REPLLogic.FileOperations)) => () => {
 }
 
 let run_repl = () => {
+    Js.log("Welcome to ReScript REPL\n")
+    Js.log("Available Commands:")
+    Js.log(".load   - Load a Module into the current REPL context")
+    Js.log(".reset  - Start Mutliline Mode")
+    Js.log(".{:     - Start Mutliline Mode")
+    Js.log(".}:     - End Mutliline Mode")
+
     let replServer = start({ prompt: "> ", eval })
     Repl.defineCommand(replServer, ":{", startMultiLineMode(replServer));
     Repl.defineCommand(replServer, "}:", () => {

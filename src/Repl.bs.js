@@ -5,7 +5,6 @@ var Fs = require("fs");
 var Curry = require("rescript/lib/js/curry.js");
 var REPLLogic = require("./repl-logic/REPLLogic.bs.js");
 var Noderepl = require("node:repl");
-var Caml_js_exceptions = require("rescript/lib/js/caml_js_exceptions.js");
 
 var Repl = {};
 
@@ -24,30 +23,69 @@ function isRecoverableError(error) {
   return re.test(error.message);
 }
 
-function f(param) {
-  console.log("line 1");
-  console.log("line 2");
-}
+var convertToJSONString = (function(rescriptStdoutStr) {
+        const re = /[a-z]*:/g
+        let y = rescriptStdoutStr.split(" ").map(s => re.test(s) ? ["\"", s.split(":")[0], "\"", ":"].join("") : s)
+        let z = y.map(s => s.split("\n"))
+        let transformed = Array.prototype.concat(...z).join("")
+        return JSON.parse(transformed.replaceAll("'", "\"").replaceAll("undefined", "\"None\""))
+    });
 
-var s = {
-  contents: ""
-};
+var handleDirtyWork = (function(callback, value) {
+    if (value !== "") {
+        try {
+            callback(null, JSON.parse(value))
+        } catch {
+            // Okay... so objects are ending up here as such:
+            // '{\n' +
+            //     "  first: 'John',\n" +
+            //     "  last: 'Jingleheimer',\n" +
+            //     "  address: { street: 'STREET', zip: 85923 }\n" +
+            //     '}'
+            // But you want to have it in the format of a json string, so that
+            // the results displayed at the REPL are just as Node repl would display it.
+            // Need to wrap all series of characters which precede ":" in single quotes
+            // to accomplish this.
+
+            // Create a Regex which gets any series of characters A-Z/a-z not
+            // surrounded by single quotes.
+
+
+            try {
+                // This this fails to parse stdout result of None
+                callback(null, convertToJSONString(value))
+            }  catch {
+                console.log(value)
+                callback(null, "couldnt parse None")
+            }
+        }
+    } else {
+        callback(null, value)
+    }
+  });
 
 async function $$eval(codeStr, context, filename, callback) {
-  try {
-    s.contents = s.contents + "\n" + codeStr;
-    console.log("s");
-    console.log(s);
-    return ;
-  }
-  catch (raw_e){
-    var e = Caml_js_exceptions.internalToOCamlException(raw_e);
-    if (isRecoverableError(e)) {
-      console.log("it's recoverable?");
+  if (multilineModeState.contents.active) {
+    var prevCodeStr = multilineModeState.contents.rescriptCodeInput;
+    if (prevCodeStr !== undefined) {
+      multilineModeState.contents = {
+        active: true,
+        rescriptCodeInput: prevCodeStr + "\n" + codeStr
+      };
       return Curry._2(callback, undefined, "");
     } else {
+      console.log("INVARIANT VIOLATION: The RescriptCode case expects for there to be some rescriptCodeInput present.");
       return ;
     }
+  }
+  var rescriptStdout = await REPLLogic.handleBuildAndEval(codeStr, {
+        read: REPLLogic.FileOperations.read,
+        write: REPLLogic.FileOperations.write
+      }, REPLLogic.RescriptBuild, REPLLogic.EvalJavaScriptCode);
+  if (rescriptStdout !== undefined) {
+    return handleDirtyWork(callback, rescriptStdout);
+  } else {
+    return handleDirtyWork(callback, "");
   }
 }
 
@@ -93,6 +131,12 @@ function reset(replServer, FO, param) {
 }
 
 function run_repl(param) {
+  console.log("Welcome to ReScript REPL\n");
+  console.log("Available Commands:");
+  console.log(".load   - Load a Module into the current REPL context");
+  console.log(".reset  - Start Mutliline Mode");
+  console.log(".{:     - Start Mutliline Mode");
+  console.log(".}:     - End Mutliline Mode");
   var replServer = Noderepl.start({
         prompt: "> ",
         eval: $$eval
@@ -132,8 +176,8 @@ function run_repl(param) {
 exports.Repl = Repl;
 exports.multilineModeState = multilineModeState;
 exports.isRecoverableError = isRecoverableError;
-exports.f = f;
-exports.s = s;
+exports.convertToJSONString = convertToJSONString;
+exports.handleDirtyWork = handleDirtyWork;
 exports.$$eval = $$eval;
 exports.startMultiLineMode = startMultiLineMode;
 exports.endMultiLineMode = endMultiLineMode;
